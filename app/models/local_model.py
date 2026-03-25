@@ -1,5 +1,6 @@
 ﻿import ast
 import json
+from http.client import RemoteDisconnected
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
@@ -13,11 +14,13 @@ class LocalModel(BaseModel):
         model_name: str = "google/gemma-3-4b",
         base_url: str = "http://127.0.0.1:1234/api/v1/chat",
         api_token: str = "",
+        timeout_seconds: int = 180,
     ) -> None:
         self.provider = provider
         self.model = model_name
         self.url = base_url
         self.api_token = api_token
+        self.timeout_seconds = timeout_seconds
 
     def _extract_output_text(self, data: dict) -> str:
         output = data.get("output", "")
@@ -96,7 +99,7 @@ class LocalModel(BaseModel):
         )
 
         try:
-            with urlopen(request, timeout=60) as response:
+            with urlopen(request, timeout=self.timeout_seconds) as response:
                 data = json.loads(response.read().decode("utf-8"))
 
             response_text = self._extract_output_text(data)
@@ -114,8 +117,22 @@ class LocalModel(BaseModel):
         except URLError as error:
             return (
                 "Luna: LM Studio is not reachable. "
-                "Make sure the local server is running on http://127.0.0.1:1234 "
-                f"and the /api/v1/chat endpoint is enabled. Details: {error}"
+                f"Make sure the LM Studio server is running and reachable at {self.url}. "
+                f"Details: {error}"
+            )
+        except RemoteDisconnected:
+            return (
+                "Luna: LM Studio accepted the connection but closed it without a response. "
+                f"Check that the model is fully loaded, the server is running, and the endpoint matches {self.url}."
+            )
+        except TimeoutError:
+            return (
+                "Luna: LM Studio took too long to answer after "
+                f"{self.timeout_seconds} seconds. The model may still be loading, the first reply may still be warming up, "
+                "or the selected model is too heavy for the current machine."
             )
         except (KeyError, json.JSONDecodeError) as error:
             return f"Luna: Invalid response from local model -> {error}"
+        except Exception as error:
+            return f"Luna: Unexpected local model error -> {error}"
+

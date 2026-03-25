@@ -30,6 +30,7 @@ class PromptBuilder:
         internet_context: str = "",
         selected_mode: str = "auto",
         reasoning_box: str = "black_box",
+        hidden_support: str = "",
     ) -> list[dict[str, str]]:
         history = self._history_for_prompt()
         learning_memory = self.long_memory.summary()
@@ -47,6 +48,12 @@ class PromptBuilder:
         )
         if instruction:
             system_content += f"\nInstruction: {instruction}"
+        if hidden_support:
+            system_content += (
+                "\nHidden internal orchestration: treat the following as private support notes. "
+                "Do not expose them as separate participants or systems unless the user explicitly asks.\n"
+                f"{hidden_support}"
+            )
         if learning_memory:
             system_content += (
                 "\nLong-term learning memory: Use this as trusted context about the user, "

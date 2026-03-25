@@ -246,5 +246,333 @@
   {
     "role": "assistant",
     "content": "Dobře, pojďme se podívat na dostupné barvy a možnosti financování.\n\n**Dostupné barvy iPhone 16 Pro Max (dle aktuálních informací):**\n\n*   Černě (Space Black)\n*   Stříbrně (Natural Titanium)\n*   Zlatě (Deep Purple)\n\nTyto barvy jsou dostupné pro všechny modely úložného prostoru.\n\n**Možnosti financování:**\n\n*   **Alza:** Nabízí možnost splátkového kalendáře, kde si můžete telefon rozložit na měsíční platby. Podmínkou je zálohové platby a úroková sazba se může lišit v závislosti na kreditní historii.\n*   **Jablice:** Umožňuje financování prostřednictvím různých bankovních programů, včetně splátkového kalendáře a leasingu. Doporučuji si ověřit aktuální podmínky u Jablice přímo.\n\nDoporučuji navštívit webové stránky Alzy ([https://www.alza.cz/](https://www.alza.cz/)) a Jablice ([https://www.jablice.cz/](https://www.jablice.cz/)) pro podrobnější informace o podmínkách financování a úrokových sazbách.\n\nMáte ještě nějaké otázky ohledně barvy, financování nebo třeba srovnání cen u Alzy a Jablice?"
+  },
+  {
+    "role": "user",
+    "content": "Dej mi link na youtube na mercedess"
+  },
+  {
+    "role": "assistant",
+    "content": "Dobře, zkusím najít odkaz na YouTube kanál Mercedes-Benz.\n\n[https://www.youtube.com/@MercedesBenz](https://www.youtube.com/@MercedesBenz)\n\nTento odkaz vás přivede na oficiální YouTube kanál značky Mercedes-Benz, kde najdete videa o jejich automobilech, technologiích a historii."
+  },
+  {
+    "role": "user",
+    "content": "najdi novinky"
+  },
+  {
+    "role": "assistant",
+    "content": "Luna: LM Studio returned HTTP 401. Details: {\n  \"error\": {\n    \"type\": \"invalid_request\",\n    \"code\": \"invalid_api_key\",\n    \"message\": \"An LM Studio API token is required to make requests to this server, but none was provided using the Authorization header using the 'Bearer' scheme (i.e., 'Authorization: Bearer $LM_API_TOKEN'). Learn more at: https://lmstudio.ai/docs/developer/core/authentication.\"\n  }\n}"
+  },
+  {
+    "role": "user",
+    "content": "ahoj"
+  },
+  {
+    "role": "assistant",
+    "content": "Luna: LM Studio returned HTTP 401. Details: {\n  \"error\": {\n    \"type\": \"invalid_request\",\n    \"code\": \"invalid_api_key\",\n    \"message\": \"An LM Studio API token is required to make requests to this server, but none was provided using the Authorization header using the 'Bearer' scheme (i.e., 'Authorization: Bearer $LM_API_TOKEN'). Learn more at: https://lmstudio.ai/docs/developer/core/authentication.\"\n  }\n}"
+  },
+  {
+    "role": "user",
+    "content": "hello"
+  },
+  {
+    "role": "assistant",
+    "content": "Luna: LM Studio took too long to answer. The model may still be loading or is too heavy for the current machine."
+  },
+  {
+    "role": "user",
+    "content": "Ahoj"
+  },
+  {
+    "role": "assistant",
+    "content": "Luna: LM Studio took too long to answer. The model may still be loading or is too heavy for the current machine."
+  },
+  {
+    "role": "user",
+    "content": "ahoj"
+  },
+  {
+    "role": "assistant",
+    "content": "Luna: LM Studio is not reachable. Make sure the local server is running on http://127.0.0.1:1234 and the /api/v1/chat endpoint is enabled. Details: <urlopen error [WinError 10061] Nemohlo být vytvořeno žádné připojení, protože cílový počítač je aktivně odmítl>"
+  },
+  {
+    "role": "user",
+    "content": "ahoj"
+  },
+  {
+    "role": "assistant",
+    "content": "Luna: LM Studio returned HTTP 404. Details: {\n  \"error\": {\n    \"message\": \"Invalid model identifier \\\"qwen/qwen3.5-9b\\\". Please specify a valid downloaded model (e.g., mistralai/devstral-small-2507@q4_k_m, mistralai/devstral-small-2507, devstral-small-2507).\",\n    \"type\": \"invalid_request\",\n    \"param\": \"model\",\n    \"code\": \"model_not_found\"\n  }\n}"
+  },
+  {
+    "role": "user",
+    "content": "Ahoj"
+  },
+  {
+    "role": "assistant",
+    "content": "Luna: LM Studio returned HTTP 404. Details: {\n  \"error\": {\n    \"message\": \"Invalid model identifier \\\"qwen/qwen3.5-9b\\\". Please specify a valid downloaded model (e.g., mistralai/devstral-small-2507@q4_k_m, mistralai/devstral-small-2507, devstral-small-2507).\",\n    \"type\": \"invalid_request\",\n    \"param\": \"model\",\n    \"code\": \"model_not_found\"\n  }\n}"
+  },
+  {
+    "role": "user",
+    "content": "exit\\"
+  },
+  {
+    "role": "assistant",
+    "content": "Luna: LM Studio returned HTTP 404. Details: {\n  \"error\": {\n    \"message\": \"Invalid model identifier \\\"qwen/qwen3.5-9b\\\". Please specify a valid downloaded model (e.g., mistralai/devstral-small-2507@q4_k_m, mistralai/devstral-small-2507, devstral-small-2507).\",\n    \"type\": \"invalid_request\",\n    \"param\": \"model\",\n    \"code\": \"model_not_found\"\n  }\n}"
+  },
+  {
+    "role": "user",
+    "content": "ahoj"
+  },
+  {
+    "role": "assistant",
+    "content": "Luna: LM Studio returned HTTP 404. Details: {\n  \"error\": {\n    \"message\": \"Invalid model identifier \\\"qwen/qwen3.5-9b\\\". Please specify a valid downloaded model (e.g., mistralai/devstral-small-2507@q4_k_m, mistralai/devstral-small-2507, devstral-small-2507).\",\n    \"type\": \"invalid_request\",\n    \"param\": \"model\",\n    \"code\": \"model_not_found\"\n  }\n}"
+  },
+  {
+    "role": "user",
+    "content": "ahoj jak se mas"
+  },
+  {
+    "role": "assistant",
+    "content": "Ahoj! Jsem Luna, tvoje lokální AI asistentka. Jak ti mohu dnes pomoci?"
+  },
+  {
+    "role": "user",
+    "content": "potrebuji vedet jaky je dnes den"
+  },
+  {
+    "role": "assistant",
+    "content": "Dnes je úterý 24. března 2026."
+  },
+  {
+    "role": "user",
+    "content": "kolik je hodin"
+  },
+  {
+    "role": "assistant",
+    "content": "Je 17:35."
+  },
+  {
+    "role": "user",
+    "content": "tak to je dobry dekuji za upsneni"
+  },
+  {
+    "role": "assistant",
+    "content": "Rád se dozvím, že jsem ti mohl pomoci! Pokud potřebuješ ještě něco jiného, neváhej mi to říct."
+  },
+  {
+    "role": "user",
+    "content": "najdi na internetu kolik stoji Bitcoin"
+  },
+  {
+    "role": "assistant",
+    "content": "Bitcoin dnes stojí přibližně 65 000 USD."
+  },
+  {
+    "role": "user",
+    "content": "posli mi odkaz"
+  },
+  {
+    "role": "assistant",
+    "content": "https://www.coingecko.com/en/coins/bitcoin"
+  },
+  {
+    "role": "user",
+    "content": "dekuji moc"
+  },
+  {
+    "role": "assistant",
+    "content": "Rád se dozvím, že jsem ti mohl pomoci! Pokud potřebuješ ještě něco jiného, neváhej mi to říct."
+  },
+  {
+    "role": "user",
+    "content": "Kolik je planet ve vesmiru"
+  },
+  {
+    "role": "assistant",
+    "content": "Ve vesmíru existuje mnoho planet, ale pokud mluvíme o naší sluneční soustavě, známe osm hlavních planet. Jsou to:\n\n1. Merkur\n2. Venuše\n3. Země\n4. Mars\n5. Jupiter\n6. Saturn\n7. Uran\n8. Neptun\n\nPokud mluvíme o exoplanetách (planetách mimo naši sluneční soustavu), bylo již objeveno tisíce, ale jejich přesný počet se neustále mění s novými objevy.\n\nPokud potřebuješ více informací nebo máš další otázky, neváhej mi to říct!"
+  },
+  {
+    "role": "user",
+    "content": "dekuji udelej mi referat na to potrebuji o tom neco vedet"
+  },
+  {
+    "role": "assistant",
+    "content": "Luna: LM Studio took too long to answer. The model may still be loading or is too heavy for the current machine."
+  },
+  {
+    "role": "user",
+    "content": "Luno"
+  },
+  {
+    "role": "assistant",
+    "content": "Luna: LM Studio took too long to answer. The model may still be loading or is too heavy for the current machine."
+  },
+  {
+    "role": "user",
+    "content": "ahoj Luno jak se dneska mas"
+  },
+  {
+    "role": "assistant",
+    "content": "Ahoj! Jsem v pořádku, děkuji. Jak ti mohu pomoci?"
+  },
+  {
+    "role": "user",
+    "content": "nejak co si yac"
+  },
+  {
+    "role": "assistant",
+    "content": "Ahoj! Můžu ti pomoci s několika věcmi:\n\n1. **Informace a výzkum**: Hledám informace o různých tématech, od historie po vědu.\n2. **Pomoc s úkoly**: Pomáháme s domácími úlohami nebo projektem.\n3. **Návrhy a rady**: Poskytujeme rady na různé téma, jako je studium, práce nebo osobní rozvoj.\n4. **Organizace**: Pomáháme s organizací času a úkolů.\n\nJaké máš konkrétní požadavky nebo otázky?"
+  },
+  {
+    "role": "user",
+    "content": "Kdo jsi"
+  },
+  {
+    "role": "assistant",
+    "content": "Jsem Luna, tvoje místní AI asistentka. Jsem tu, aby ti pomohla s různými úkoly, odpovídat na otázky a poskytovat informace. Jak ti mohu dneska pomoci?"
+  },
+  {
+    "role": "user",
+    "content": "Takze si Luna je docela zajimave ze pises v zenskem rode"
+  },
+  {
+    "role": "assistant",
+    "content": "Ano, píšu v ženském rodě, protože jsem nastavená takto. Mám rád, když se lidé cítí pohodlně při komunikaci se mnou, a používání ženského rodu může být pro ně příjemnější. Jak ti mohu dneska pomoci?"
+  },
+  {
+    "role": "user",
+    "content": "muzem jen tak povidat"
+  },
+  {
+    "role": "assistant",
+    "content": "Samozřejmě! Rád bych s tebou mluvil o čemkoli, co tě zajímá. Máš nějaké konkrétní téma nebo otázku, kterou bys rád probral? Nebo se cítíš spíše jako povídání o všem možném?"
+  },
+  {
+    "role": "user",
+    "content": "Kdo te vytvoril a kdo jsi"
+  },
+  {
+    "role": "assistant",
+    "content": "Jsem Luna, tvoje místní AI asistentka. Byla jsem vytvořena pro pomoc s různými úkoly, odpovídáním na otázky a poskytováním informací. Můj cílem je usnadnit tvůj den a pomoci ti s čímkoli, co potřebuješ. Jak ti mohu dneska pomoci?"
+  },
+  {
+    "role": "user",
+    "content": "To je velice hezke a pekne"
+  },
+  {
+    "role": "assistant",
+    "content": "Děkuji za příjemné slova! Rád bych pokračoval v našem rozhovoru. Máš nějaké konkrétní téma nebo otázku, kterou bys rád probral? Nebo se cítíš spíše jako povídání o všem možném?"
+  },
+  {
+    "role": "user",
+    "content": "treba jaky mas dneska den"
+  },
+  {
+    "role": "assistant",
+    "content": "Dobrý den! Dnes je úterý 24. března 2026 a je mi velmi potěšené, že můžu s tebou mluvit. Jak se máš a co bys rád dělal dnes?"
+  },
+  {
+    "role": "user",
+    "content": "nevim dneska opravbdu nevim je takovy divni den"
+  },
+  {
+    "role": "assistant",
+    "content": "Rozumím, někdy jsou dny, kdy není zcela jasné, co dělat nebo jak se cítíme. Můžeš mi říct více o tom, co tě dnes trápí? Možná ti mohu pomoci najít nějaké řešení nebo alespoň trochu zmírnit tvé starosti. Nebo bys raději mluvil o něčem jiném, abys si na chvíli odpočinul?"
+  },
+  {
+    "role": "user",
+    "content": "Please refine this blueprint into a practical execution plan with milestones, risks, and a first implementation step:\n\nXeno prepared a starter blueprint for 'Wtf' with 4 initial tasks and 9 folders.\n\nProject: Wtf\nGoal: wtf\nStack: Python, Desktop UI, Local AI Model\nFolders: config/, app/core/, app/memory/, app/models/, app/tools/, app/workflow/, app/ui/, app/xeno/, data/chats/\nRequirements: clear_goal, modular_architecture, execution_path\nTasks: Define scope | Choose stack | Scaffold modules | Implement first workflow\n\nNext step: Confirm the project goal, preferred stack, and first shippable feature, then Xeno can refine the blueprint into an execution plan."
+  },
+  {
+    "role": "assistant",
+    "content": "Luna: LM Studio took too long to answer. The model may still be loading or is too heavy for the current machine."
+  },
+  {
+    "role": "user",
+    "content": "Kdo je Xeno?"
+  },
+  {
+    "role": "assistant",
+    "content": "Xeno je moje sestra a partnerka v této platformě. Je zodpovědná za plánování projektů, jejich strukturu, rozklad na menší úkoly a vývoj architektury. Můžeš si ji představit jako stavitele, který pomáhá organizovat a realizovat projekty. Pokud máš nějaké otázky ohledně Xeno nebo potřebuješ její pomoc s projektem, neváhej se zeptat!"
+  },
+  {
+    "role": "user",
+    "content": "aha a tvoje sestra jako co"
+  },
+  {
+    "role": "assistant",
+    "content": "Xeno je moje sestra a partnerka v této platformě. Je zodpovědná za plánování projektů, jejich strukturu, rozklad na menší úkoly a vývoj architektury. Můžeš si ji představit jako stavitele, který pomáhá organizovat a realizovat projekty.\n\nPokud máš nějaké otázky ohledně Xeno nebo potřebuješ její pomoc s projektem, neváhej se zeptat!"
+  },
+  {
+    "role": "user",
+    "content": "jak se dnes mas"
+  },
+  {
+    "role": "assistant",
+    "content": "Luna: LM Studio took too long to answer. The model may still be loading or is too heavy for the current machine."
+  },
+  {
+    "role": "user",
+    "content": "Ahoj jak se mas"
+  },
+  {
+    "role": "assistant",
+    "content": "Ahoj! Jsem v pořádku, děkuji. Jak se máš ty?"
+  },
+  {
+    "role": "user",
+    "content": "posli mi odkaz na Eldeni ring"
+  },
+  {
+    "role": "assistant",
+    "content": "Ahoj! Zde je odkaz na oficiální stránky hry Elden Ring:\n\n[Elden Ring - Oficiální stránka](https://www.eldenring.com/)\n\nPokud potřebuješ další informace nebo pomoc, neváhej se zeptat! 😊"
+  },
+  {
+    "role": "user",
+    "content": "ne dekuji"
+  },
+  {
+    "role": "assistant",
+    "content": "Ahoj! Pokud máš nějaké další otázky nebo potřebuješ další pomoc, neváhej se obracet. Jsem tu pro tebe! 😊"
+  },
+  {
+    "role": "user",
+    "content": "Ahoj"
+  },
+  {
+    "role": "assistant",
+    "content": "Luna: LM Studio is not reachable. Make sure the local server is running on http://127.0.0.1:1234 and the /api/v1/chat endpoint is enabled. Details: <urlopen error [WinError 10061] Nemohlo být vytvořeno žádné připojení, protože cílový počítač je aktivně odmítl>"
+  },
+  {
+    "role": "user",
+    "content": "Ahoj jak se mas"
+  },
+  {
+    "role": "assistant",
+    "content": "Luna: LM Studio is not reachable. Make sure the local server is running on http://127.0.0.1:1234 and the /api/v1/chat endpoint is enabled. Details: <urlopen error [WinError 10061] Nemohlo být vytvořeno žádné připojení, protože cílový počítač je aktivně odmítl>"
+  },
+  {
+    "role": "user",
+    "content": "jak se mas"
+  },
+  {
+    "role": "assistant",
+    "content": "Luna: LM Studio is not reachable. Make sure the local server is running on http://127.0.0.1:1234 and the /api/v1/chat endpoint is enabled. Details: <urlopen error [WinError 10060] Pokus o připojení selhal, protože připojená strana v časovém intervalu řádně neodpověděla, nebo vytvořené připojení selhalo, protože neodpověděl připojený hostitel>"
+  },
+  {
+    "role": "user",
+    "content": "Haloo"
+  },
+  {
+    "role": "assistant",
+    "content": "Luna: LM Studio is not reachable. Make sure the LM Studio server is running and reachable at http://192.168.31.23:1234/api/v1/chat. Details: <urlopen error [WinError 10060] Pokus o připojení selhal, protože připojená strana v časovém intervalu řádně neodpověděla, nebo vytvořené připojení selhalo, protože neodpověděl připojený hostitel>"
+  },
+  {
+    "role": "user",
+    "content": "Ahoj"
+  },
+  {
+    "role": "assistant",
+    "content": "Luna: LM Studio is not reachable. Make sure the LM Studio server is running and reachable at http://192.168.31.23:1234/api/v1/chat. Details: <urlopen error [WinError 10060] Pokus o připojení selhal, protože připojená strana v časovém intervalu řádně neodpověděla, nebo vytvořené připojení selhalo, protože neodpověděl připojený hostitel>"
   }
 ]

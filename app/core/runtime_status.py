@@ -1,11 +1,26 @@
-﻿from config.settings import AppSettings
+﻿from importlib import import_module
+from typing import Protocol, cast
+
 from app.tools.internet import InternetTool
 
 
+class SettingsLike(Protocol):
+    default_workflow: str
+    default_reasoning_box: str
+    memory_review_interval: int
+    lm_studio_model: str
+
+
+def _default_settings() -> SettingsLike:
+    settings_module = import_module("config.settings")
+    settings_class = getattr(settings_module, "AppSettings")
+    return cast(SettingsLike, settings_class())
+
+
 class RuntimeStatusFormatter:
-    def __init__(self, settings: AppSettings, internet: InternetTool) -> None:
-        self.settings = settings
-        self.internet = internet
+    def __init__(self, settings: SettingsLike | None = None, internet: InternetTool | None = None) -> None:
+        self.settings = settings or _default_settings()
+        self.internet = internet or InternetTool()
 
     def format(self) -> str:
         return (

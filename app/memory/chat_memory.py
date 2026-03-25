@@ -59,3 +59,6 @@ class ChatMemory:
     def clear(self) -> None:
         self.history.clear()
         self._persist()
+
+    def clear_history(self) -> None:
+        self.clear()
