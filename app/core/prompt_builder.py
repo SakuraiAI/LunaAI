@@ -31,6 +31,7 @@ class PromptBuilder:
         selected_mode: str = "auto",
         reasoning_box: str = "black_box",
         hidden_support: str = "",
+        project_context: str = "",
     ) -> list[dict[str, str]]:
         history = self._history_for_prompt()
         learning_memory = self.long_memory.summary()

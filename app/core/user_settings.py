@@ -19,6 +19,8 @@ class UserWorkspaceSettings:
     github_username: str = ""
     github_token: str = ""
     google_email: str = ""
+    profile_display_name: str = ""
+    profile_image_path: str = ""
 
 
 class UserSettingsStore:

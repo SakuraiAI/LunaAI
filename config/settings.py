@@ -9,6 +9,7 @@ MODEL_TYPE = "local"
 MEMORY_PATH = "data/chats/chat_history.json"
 LONG_MEMORY_PATH = "data/chats/long_memory.json"
 USER_SETTINGS_PATH = "data/settings/user_settings.json"
+PROJECTS_PATH = "data/projects/projects.json"
 DEFAULT_WORKFLOW = "auto"
 DEFAULT_REASONING_BOX = "black_box"
 MEMORY_REVIEW_INTERVAL = 6
@@ -31,6 +32,7 @@ class AppSettings:
     memory_path: str = MEMORY_PATH
     long_memory_path: str = LONG_MEMORY_PATH
     user_settings_path: str = USER_SETTINGS_PATH
+    projects_path: str = PROJECTS_PATH
     default_workflow: str = DEFAULT_WORKFLOW
     default_reasoning_box: str = DEFAULT_REASONING_BOX
     memory_review_interval: int = MEMORY_REVIEW_INTERVAL
@@ -45,6 +47,7 @@ class AppSettings:
         Path(self.memory_path).parent.mkdir(parents=True, exist_ok=True)
         Path(self.long_memory_path).parent.mkdir(parents=True, exist_ok=True)
         Path(self.user_settings_path).parent.mkdir(parents=True, exist_ok=True)
+        Path(self.projects_path).parent.mkdir(parents=True, exist_ok=True)
 
 
 __all__ = [
@@ -56,6 +59,7 @@ __all__ = [
     "MEMORY_PATH",
     "LONG_MEMORY_PATH",
     "USER_SETTINGS_PATH",
+    "PROJECTS_PATH",
     "DEFAULT_WORKFLOW",
     "DEFAULT_REASONING_BOX",
     "MEMORY_REVIEW_INTERVAL",
