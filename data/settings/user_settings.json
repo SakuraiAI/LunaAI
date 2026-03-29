@@ -1,6 +1,6 @@
 {
   "unreal_engine_path": "",
-  "blender_path": "",
+  "blender_path": "D:/SteamLibrary/steamapps/common/Blender/blender.exe",
   "fl_studio_path": "",
   "photoshop_path": "",
   "vscode_path": "C:/Users/sakur/AppData/Local/Programs/Microsoft VS Code/Code.exe",
@@ -14,5 +14,9 @@
   "github_token": "",
   "google_email": "filip.bukovsky27@gmail.com",
   "profile_display_name": "Sakurai Haise",
-  "profile_image_path": "C:/Users/sakur/Pictures/IMG_1589.png"
+  "profile_image_path": "C:/Users/sakur/Pictures/IMG_1589.png",
+  "agent_execution_mode": "ask",
+  "allow_app_launch": true,
+  "allow_path_open": true,
+  "allow_file_changes": true
 }

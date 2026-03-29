@@ -1,5 +1,6 @@
-﻿import ast
+import ast
 import json
+import re
 from http.client import RemoteDisconnected
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
@@ -60,6 +61,25 @@ class LocalModel(BaseModel):
             cleaned = cleaned.removeprefix("Assistant: ").strip()
 
         cleaned = cleaned.replace("\r\n", "\n").strip()
+
+        lines: list[str] = []
+        seen_urls: set[str] = set()
+        url_pattern = re.compile(r"https?://\S+")
+        for raw_line in cleaned.split("\n"):
+            line = raw_line.strip()
+            if not line:
+                if lines and lines[-1] != "":
+                    lines.append("")
+                continue
+            urls = url_pattern.findall(line)
+            if urls and all(url in seen_urls for url in urls) and len(line) <= 240:
+                continue
+            for url in urls:
+                seen_urls.add(url)
+            if not lines or lines[-1] != line:
+                lines.append(line)
+
+        cleaned = "\n".join(lines).strip()
         return cleaned
 
     def generate(self, prompt: str | list[dict[str, str]]) -> str:
@@ -104,9 +124,6 @@ class LocalModel(BaseModel):
 
             response_text = self._extract_output_text(data)
             response_text = self._clean_response_text(response_text)
-            if "google" in response_text.lower():
-                response_text = response_text.replace("Google", "LunaAI system")
-
             return response_text
         except HTTPError as error:
             try:
@@ -135,4 +152,3 @@ class LocalModel(BaseModel):
             return f"Luna: Invalid response from local model -> {error}"
         except Exception as error:
             return f"Luna: Unexpected local model error -> {error}"
-

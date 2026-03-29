@@ -139,11 +139,18 @@ class InternetTool:
 
         related_topics = payload.get("RelatedTopics", [])
         related_lines: list[str] = []
+        seen_related: set[str] = set()
         for topic in related_topics:
             item = self._extract_topic(topic)
-            if item:
-                related_lines.append(item)
-            if len(related_lines) == 3:
+            if not item:
+                continue
+            if item in seen_related:
+                continue
+            if source_url and source_url in item:
+                continue
+            related_lines.append(item)
+            seen_related.add(item)
+            if len(related_lines) == 2:
                 break
 
         if related_lines:

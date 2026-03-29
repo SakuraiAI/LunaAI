@@ -21,6 +21,10 @@ class UserWorkspaceSettings:
     google_email: str = ""
     profile_display_name: str = ""
     profile_image_path: str = ""
+    agent_execution_mode: str = "ask"
+    allow_app_launch: bool = True
+    allow_path_open: bool = True
+    allow_file_changes: bool = True
 
 
 class UserSettingsStore:
@@ -42,9 +46,14 @@ class UserSettingsStore:
         if not isinstance(payload, dict):
             return self.data
 
-        for field_name in self.data.__dataclass_fields__:
-            value = payload.get(field_name, "")
-            if isinstance(value, str):
+        for field_name, field_info in self.data.__dataclass_fields__.items():
+            value = payload.get(field_name)
+            current = getattr(self.data, field_name)
+            if isinstance(current, bool):
+                if isinstance(value, bool):
+                    setattr(self.data, field_name, value)
+                continue
+            if isinstance(current, str) and isinstance(value, str):
                 setattr(self.data, field_name, value)
 
         return self.data

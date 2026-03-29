@@ -186,6 +186,12 @@ class ProjectStore:
         clean_entry = entry.strip()
         if not clean_entry:
             return project
+        if project.memory_entries and project.memory_entries[0] == clean_entry:
+            return project
+        project.memory_entries.insert(0, clean_entry)
+        project.memory_entries = project.memory_entries[:24]
+        self.save()
+        return project
         project.memory_entries.insert(0, clean_entry)
         project.memory_entries = project.memory_entries[:24]
         self.save()
@@ -209,9 +215,9 @@ class ProjectStore:
         return None
 
     def get_current_project(self) -> ProjectRecord | None:
-        if self.current_project_id:
-            return self.get_project(self.current_project_id)
-        return self.projects[0] if self.projects else None
+        if not self.current_project_id:
+            return None
+        return self.get_project(self.current_project_id)
 
     def set_current_project(self, project_id: str) -> ProjectRecord | None:
         project = self.get_project(project_id)
@@ -220,3 +226,5 @@ class ProjectStore:
         self.current_project_id = project.id
         self.save()
         return project
+
+

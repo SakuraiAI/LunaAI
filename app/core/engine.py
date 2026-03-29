@@ -1,7 +1,12 @@
+﻿from __future__ import annotations
+
 from pathlib import Path
+from typing import Callable
+import re
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from config.settings import AppSettings
+from app.core.action_log import ActionLogStore
 from app.core.memory_coordinator import MemoryCoordinator
 from app.core.prompt_builder import PromptBuilder
 from app.core.project_store import ProjectStore
@@ -35,6 +40,8 @@ class LunaEngine:
         self.xeno = XenoCoordinator()
         self.user_settings = UserSettingsStore(Path(self.settings.user_settings_path))
         self.projects = ProjectStore(Path(self.settings.projects_path))
+        self.action_log = ActionLogStore(Path("data/logs/action_log.jsonl"))
+        self.pending_action: tuple[str, str, Callable[[], str]] | None = None
 
         try:
             timezone = ZoneInfo("Europe/Prague")
@@ -78,39 +85,31 @@ class LunaEngine:
 
     def _handle_internet_command(self, user_input: str) -> str | None:
         command = user_input.strip().lower()
-
         if command == "/internet on":
             self.internet.set_enabled(True)
             return "Luna: Internet access enabled."
-
         if command == "/internet off":
             self.internet.set_enabled(False)
             return "Luna: Internet access disabled."
-
         if command == "/internet auto":
             self.internet.set_enabled(True)
             self.internet.set_mode("auto")
             return "Luna: Internet mode set to auto."
-
         if command == "/internet manual":
             self.internet.set_mode("manual")
             return "Luna: Internet mode set to manual."
-
         if command == "/internet status":
             return self.internet.status()
-
         if user_input.startswith("/search "):
             query = user_input[8:].strip()
             if not query:
                 return "Luna: Please provide a search query."
             return self.internet.search(query)
-
         return None
 
     def _internet_context(self, user_input: str) -> str:
         if not self.internet.should_search(user_input):
             return ""
-
         result = self.internet.search(user_input)
         if result.startswith("Luna:"):
             return result[5:].strip()
@@ -120,6 +119,444 @@ class LunaEngine:
         if not self.xeno.should_consult(user_input):
             return ""
         return self.xeno.build_hidden_support(user_input)
+
+    def _action_mode(self) -> str:
+        mode = str(self.user_settings.data.agent_execution_mode or "ask").strip().lower()
+        if mode not in {"ask", "auto", "block"}:
+            return "ask"
+        return mode
+
+    def _is_action_allowed(self, category: str) -> bool:
+        workspace = self.user_settings.data
+        if category == "app_launch":
+            return bool(workspace.allow_app_launch)
+        if category == "path_open":
+            return bool(workspace.allow_path_open)
+        if category == "file_change":
+            return bool(workspace.allow_file_changes)
+        return True
+
+    def _log_action(self, category: str, title: str, status: str, detail: str) -> None:
+        self.action_log.record(category=category, title=title, status=status, detail=detail)
+
+    def list_recent_actions(self, limit: int = 8) -> list[dict[str, str]]:
+        return [
+            {
+                "timestamp": entry.timestamp,
+                "category": entry.category,
+                "title": entry.title,
+                "status": entry.status,
+                "detail": entry.detail,
+            }
+            for entry in self.action_log.recent(limit)
+        ]
+
+    def format_recent_actions(self, limit: int = 8) -> str:
+        entries = self.list_recent_actions(limit)
+        if not entries:
+            return "No recent agent actions yet."
+        lines: list[str] = []
+        for entry in entries:
+            lines.append(f"[{entry['timestamp']}] {entry['status'].upper()} - {entry['title']}")
+            if entry["detail"]:
+                lines.append(entry["detail"])
+        return "\n\n".join(lines)
+
+    def _guarded_action(self, category: str, title: str, callback: Callable[[], str]) -> str:
+        if not self._is_action_allowed(category):
+            detail = f"{title} is blocked by the current agent permissions."
+            self._log_action(category, title, "blocked", detail)
+            return f"Luna: {detail}"
+        mode = self._action_mode()
+        if mode == "block":
+            detail = f"{title} is blocked because agent execution mode is set to block."
+            self._log_action(category, title, "blocked", detail)
+            return f"Luna: {detail}"
+        if mode == "ask":
+            self.pending_action = (category, title, callback)
+            detail = f"Pending approval for {title}."
+            self._log_action(category, title, "pending", detail)
+            return "Luna: Mam akci pripravenou. Napis `potvrd akci`, pokud ji mam opravdu provest, nebo `zrus akci`, pokud ji mam zahodit."
+        try:
+            message = callback()
+        except OSError as error:
+            detail = f"{title} failed: {error}"
+            self._log_action(category, title, "failed", detail)
+            return f"Luna: {detail}"
+        self._log_action(category, title, "completed", message)
+        return f"Luna: {message}"
+
+    def has_pending_action(self) -> bool:
+        return self.pending_action is not None
+
+    def get_pending_action_title(self) -> str:
+        if self.pending_action is None:
+            return ""
+        return self.pending_action[1]
+
+    def confirm_pending_action(self) -> str:
+        return self.chat("potvrd akci")
+
+    def cancel_pending_action(self) -> str:
+        return self.chat("zrus akci")
+
+    def _handle_pending_action_command(self, user_input: str) -> str | None:
+        normalized = " ".join(user_input.strip().lower().split())
+        if normalized not in {"potvrd akci", "confirm action", "zrus akci", "cancel action"}:
+            return None
+        if self.pending_action is None:
+            return "Luna: Ted nemam zadnou cekajici akci k potvrzeni."
+        category, title, callback = self.pending_action
+        self.pending_action = None
+        if normalized in {"zrus akci", "cancel action"}:
+            detail = f"Cancelled {title}."
+            self._log_action(category, title, "cancelled", detail)
+            return f"Luna: {detail}"
+        try:
+            message = callback()
+        except OSError as error:
+            detail = f"{title} failed: {error}"
+            self._log_action(category, title, "failed", detail)
+            return f"Luna: {detail}"
+        self._log_action(category, title, "completed", message)
+        return f"Luna: {message}"
+
+    def _resolve_local_target(self, raw_target: str) -> Path | None:
+        target_text = raw_target.strip().strip('"').strip("'")
+        if not target_text:
+            return None
+        candidate = Path(target_text).expanduser()
+        if candidate.exists():
+            return candidate
+        workspace_candidate = (Path.cwd() / target_text).resolve()
+        if workspace_candidate.exists():
+            return workspace_candidate
+        return None
+
+    def _default_action_root(self) -> Path:
+        current_project = self.projects.get_current_project()
+        if current_project is not None:
+            return self.desktop_actions.ensure_project_workspace(str(current_project.get("name", "")))
+        return Path.cwd()
+
+    def _resolve_creation_target(self, raw_target: str) -> Path:
+        target_text = raw_target.strip().strip('"').strip("'")
+        if not target_text:
+            return self._default_action_root()
+        candidate = Path(target_text).expanduser()
+        if candidate.is_absolute():
+            return candidate
+        return (self._default_action_root() / candidate).resolve()
+
+    def _search_roots(self) -> list[Path]:
+        roots: list[Path] = []
+        current_project = self.projects.get_current_project()
+        if current_project is not None:
+            roots.append(self.desktop_actions.ensure_project_workspace(str(current_project.get("name", ""))))
+        cwd = Path.cwd()
+        if cwd not in roots:
+            roots.append(cwd)
+        return roots
+
+    def _find_named_target(self, target_name: str, *, prefer_directory: bool | None = None) -> Path | None:
+        clean_name = target_name.strip().strip('"').strip("'")
+        if not clean_name:
+            return None
+        lower_name = clean_name.lower()
+        for root in self._search_roots():
+            if not root.exists():
+                continue
+            try:
+                for path in root.rglob("*"):
+                    if path.name.lower() != lower_name:
+                        continue
+                    if prefer_directory is True and not path.is_dir():
+                        continue
+                    if prefer_directory is False and not path.is_file():
+                        continue
+                    return path
+            except OSError:
+                continue
+        return None
+
+    def _split_action_chain(self, user_input: str) -> list[str]:
+        normalized = " ".join(user_input.strip().split())
+        separators = [
+            r"\s+a pak\s+",
+            r"\s+potom\s+",
+            r"\s+and then\s+",
+            r"\s+then\s+",
+        ]
+        for separator in separators:
+            if re.search(separator, normalized, flags=re.IGNORECASE):
+                parts = [part.strip(" ,.") for part in re.split(separator, normalized, flags=re.IGNORECASE) if part.strip(" ,.")]
+                if len(parts) > 1:
+                    return parts
+        return [normalized]
+
+    def _chain_action_category(self, parts: list[str]) -> str:
+        lowered = " ".join(parts).lower()
+        if any(token in lowered for token in ["vytvor", "create", "make", "prepis", "rewrite", "overwrite", "append", "pridej do"]):
+            return "file_change"
+        if any(token in lowered for token in ["vscode", "vs code", "blender", "unreal", "unity", "photoshop", "davinci", "premiere", "after effects", "figma", "fl studio", "substance"]):
+            return "app_launch"
+        return "path_open"
+
+    def _execute_chained_action_part(self, user_input: str) -> str | None:
+        original_mode = self.user_settings.data.agent_execution_mode
+        self.user_settings.data.agent_execution_mode = "auto"
+        try:
+            result = self._try_local_path_action(user_input)
+            if result is None:
+                result = self._try_local_app_action(user_input)
+        finally:
+            self.user_settings.data.agent_execution_mode = original_mode
+
+        if result is None:
+            return None
+
+        cleaned = result.removeprefix("Luna: ").strip()
+        if not cleaned:
+            return None
+        if any(token in cleaned.lower() for token in ["blocked", "nemohla", "nenasla", "chybi", "failed"]):
+            raise OSError(cleaned)
+        return cleaned
+
+    def _try_local_action(self, user_input: str) -> str | None:
+        parts = self._split_action_chain(user_input)
+        if len(parts) > 1:
+            category = self._chain_action_category(parts)
+            title = " -> ".join(parts)
+
+            def run_chain() -> str:
+                messages: list[str] = []
+                for part in parts:
+                    result = self._execute_chained_action_part(part)
+                    if result is None:
+                        raise OSError(f'Neumim provest tento krok: "{part}"')
+                    clean_result = result.rstrip(".")
+                    if clean_result and clean_result not in messages:
+                        messages.append(clean_result)
+                return ". ".join(messages) + "."
+
+            return self._guarded_action(category, f"chain action: {title}", run_chain)
+
+        local_path_result = self._try_local_path_action(user_input)
+        if local_path_result is not None:
+            return local_path_result
+        return self._try_local_app_action(user_input)
+
+    def _try_local_path_action(self, user_input: str) -> str | None:
+        normalized = " ".join(user_input.strip().split())
+        lowered = normalized.lower()
+        if not normalized:
+            return None
+
+        project_blueprints = [
+            (r'(?:vytvor|vytvo?|create|make) python projekt (.+?)(?: a otevri ve vscode| and open in vscode)?$', "python"),
+            (r'(?:vytvor|vytvo?|create|make) web projekt (.+?)(?: a otevri ve vscode| and open in vscode)?$', "web"),
+            (r'(?:vytvor|vytvo?|create|make) pyside projekt (.+?)(?: a otevri ve vscode| and open in vscode)?$', "pyside"),
+        ]
+        for pattern, kind in project_blueprints:
+            match = re.search(pattern, normalized, flags=re.IGNORECASE)
+            if not match:
+                continue
+            project_name = match.group(1).strip().strip('"').strip("'")
+            if not project_name:
+                return "Luna: Chybi nazev projektu."
+            open_in_vscode = "vscode" in lowered
+
+            def run_project_creation() -> str:
+                if kind == "python":
+                    workspace = self.desktop_actions.create_python_project(project_name)
+                elif kind == "web":
+                    workspace = self.desktop_actions.create_web_project(project_name)
+                else:
+                    workspace = self.desktop_actions.create_pyside_project(project_name)
+                if open_in_vscode:
+                    vscode_message = self.desktop_actions.open_in_vscode(self.user_settings.data.vscode_path, workspace)
+                    return f"Created {kind} project {workspace}. {vscode_message}."
+                return f"Created {kind} project {workspace}."
+
+            return self._guarded_action("file_change", f"create {kind} project {project_name}", run_project_creation)
+
+        rewrite_patterns = [r'(?:prepis|p?epi?|rewrite|overwrite) (?:soubor|file) (.+?) (?:s obsahem|with content) (.+)$']
+        for pattern in rewrite_patterns:
+            match = re.search(pattern, normalized, flags=re.IGNORECASE)
+            if not match:
+                continue
+            target = self._resolve_creation_target(match.group(1))
+            content = match.group(2)
+            return self._guarded_action("file_change", f"overwrite file {target}", lambda: self.desktop_actions.overwrite_file(target, content))
+
+        append_patterns = [r'(?:pridej do|p?idej do|append to) (?:souboru|soubor|file) (.+?) (?:obsah|content) (.+)$']
+        for pattern in append_patterns:
+            match = re.search(pattern, normalized, flags=re.IGNORECASE)
+            if not match:
+                continue
+            target = self._resolve_creation_target(match.group(1))
+            content = match.group(2)
+            return self._guarded_action("file_change", f"append to file {target}", lambda: self.desktop_actions.append_to_file(target, content))
+
+        multi_file_match = re.search(
+            r'(?:vytvor|vytvo?|create|make) (?:soubory|files) (.+?)(?: (?:a )?otevri ve vscode| (?:and )?open in vscode)?$',
+            normalized,
+            flags=re.IGNORECASE,
+        )
+        if multi_file_match:
+            raw_targets = multi_file_match.group(1)
+            open_in_vscode = "vscode" in lowered
+            parts = [part.strip().strip('"').strip("'") for part in re.split(r",|;", raw_targets) if part.strip()]
+            if not parts:
+                return "Luna: Chybi seznam souboru."
+            targets = {self._resolve_creation_target(part): "" for part in parts}
+
+            def create_many_files() -> str:
+                message = self.desktop_actions.create_files_batch(targets)
+                if open_in_vscode:
+                    first_target = next(iter(targets.keys()))
+                    vscode_message = self.desktop_actions.open_in_vscode(self.user_settings.data.vscode_path, first_target)
+                    return f"{message} {vscode_message}."
+                return message
+
+            return self._guarded_action("file_change", f"create files {', '.join(parts)}", create_many_files)
+        rich_file_match = re.search(
+            r'(?:vytvor|vytvo?|create|make) (?:soubor|file) (.+?) (?:s obsahem|with content) (.+?)(?: (?:a )?otevri ve vscode| (?:and )?open in vscode)?$',
+            normalized,
+            flags=re.IGNORECASE,
+        )
+        if rich_file_match:
+            target = self._resolve_creation_target(rich_file_match.group(1))
+            content = rich_file_match.group(2)
+            open_in_vscode = "vscode" in lowered
+
+            def create_rich_file() -> str:
+                message = self.desktop_actions.create_file(target, content)
+                if open_in_vscode:
+                    vscode_message = self.desktop_actions.open_in_vscode(self.user_settings.data.vscode_path, target)
+                    return f"{message}. {vscode_message}."
+                return message
+
+            return self._guarded_action("file_change", f"create file {target}", create_rich_file)
+
+        create_folder_patterns = [r'(?:vytvor|vytvo?|create|make) (?:slozku|slo?ku|folder|adresar|adres??) (.+)$']
+        for pattern in create_folder_patterns:
+            match = re.search(pattern, normalized, flags=re.IGNORECASE)
+            if not match:
+                continue
+            target = self._resolve_creation_target(match.group(1))
+            return self._guarded_action("file_change", f"create folder {target}", lambda: self.desktop_actions.create_folder(target))
+
+        create_file_patterns = [r'(?:vytvor|vytvo?|create|make) (?:soubor|file) (.+)$']
+        for pattern in create_file_patterns:
+            match = re.search(pattern, normalized, flags=re.IGNORECASE)
+            if not match:
+                continue
+            raw_target = match.group(1)
+            open_in_vscode = "vscode" in raw_target.lower()
+            if open_in_vscode:
+                raw_target = re.sub(r'(?:a )?otevri ve vscode|(?:and )?open in vscode', '', raw_target, flags=re.IGNORECASE).strip()
+            target = self._resolve_creation_target(raw_target)
+
+            def create_file_action() -> str:
+                message = self.desktop_actions.create_file(target)
+                if open_in_vscode:
+                    vscode_message = self.desktop_actions.open_in_vscode(self.user_settings.data.vscode_path, target)
+                    return f"{message}. {vscode_message}."
+                return message
+
+            return self._guarded_action("file_change", f"create file {target}", create_file_action)
+
+        direct_path_match = re.search(r'([A-Za-z]:[\\/][^"]+)', normalized)
+        if direct_path_match and any(token in lowered for token in ["otevri", "otev?i", "open", "spust", "spus?"]):
+            target = self._resolve_local_target(direct_path_match.group(1))
+            if target is not None:
+                return self._guarded_action("path_open", f"open path {target}", lambda: self.desktop_actions.open_path(target))
+            return "Luna: Tu cestu jsem na pocitaci nenasla."
+
+        command_patterns = [
+            (r'(?:otevri|otev?i|open) (?:soubor|file) (.+)$', False),
+            (r'(?:otevri|otev?i|open) (?:slozku|slo?ku|folder|adresar|adres??) (.+)$', True),
+            (r'(?:spust|spus?) (?:soubor|file|path|cestu) (.+)$', False),
+        ]
+        for pattern, prefer_directory in command_patterns:
+            match = re.search(pattern, normalized, flags=re.IGNORECASE)
+            if not match:
+                continue
+            raw_target = match.group(1)
+            target = self._resolve_local_target(raw_target)
+            if target is None:
+                target = self._find_named_target(raw_target, prefer_directory=prefer_directory)
+            if target is None:
+                return "Luna: Ten soubor nebo slozku jsem na pocitaci nenasla."
+            return self._guarded_action("path_open", f"open path {target}", lambda: self.desktop_actions.open_path(target))
+
+        if any(phrase in lowered for phrase in ["otevri workspace ve vscode", "otev?i workspace ve vscode", "open workspace in vscode", "otevri projekt ve vscode", "otev?i projekt ve vscode", "open project in vscode"]):
+            current_project = self.projects.get_current_project()
+            if current_project is None:
+                return "Luna: Ted nemam aktivni projekt, takze nemam jaky workspace otevrit ve VS Code."
+
+            def open_workspace_in_vscode() -> str:
+                result = self.open_connected_app("vscode", str(current_project.get("name", "")))
+                message = str(result.get("message", "")).strip()
+                if result.get("ok"):
+                    return message
+                raise OSError(message or "VS Code jsem nemohla otevrit.")
+
+            return self._guarded_action("app_launch", f"open workspace in VS Code for {current_project.get('name', '')}", open_workspace_in_vscode)
+
+        if any(phrase in lowered for phrase in ["otevri projekt", "otev?i projekt", "open project", "otevri workspace", "otev?i workspace", "open workspace"]):
+            current_project = self.projects.get_current_project()
+            if current_project is None:
+                return "Luna: Ted nemam aktivni projekt, takze nemam jaky workspace otevrit."
+            workspace = self.desktop_actions.ensure_project_workspace(str(current_project.get("name", "")))
+            return self._guarded_action("path_open", f"open workspace {workspace}", lambda: self.desktop_actions.open_path(workspace))
+
+        return None
+
+    def _try_local_app_action(self, user_input: str) -> str | None:
+        normalized = " ".join(user_input.strip().lower().split())
+        if not normalized:
+            return None
+
+        app_aliases = {
+            "vscode": ["vscode", "vs code", "visual studio code", "code.exe"],
+            "blender": ["blender"],
+            "unreal": ["unreal", "unreal engine", "unreal engine 5", "ue5"],
+            "unity": ["unity"],
+            "photoshop": ["photoshop"],
+            "davinci": ["davinci", "davinci resolve"],
+            "premiere": ["premiere", "premiere pro"],
+            "after_effects": ["after effects", "aftereffects"],
+            "figma": ["figma"],
+            "fl_studio": ["fl studio"],
+            "substance": ["substance", "substance painter", "substance 3d painter"],
+        }
+        open_markers = [
+            "otevri", "otevrit", "otev?", "otev?e", "otevrel", "otevrela",
+            "spust", "spustit", "zapni", "zapnout",
+            "open", "launch", "start",
+        ]
+        if not any(marker in normalized for marker in open_markers):
+            return None
+
+        for app_key, aliases in app_aliases.items():
+            if any(alias in normalized for alias in aliases):
+                project_name = ""
+                if app_key != "vscode":
+                    current_project = self.projects.get_current_project()
+                    project_name = current_project.name if current_project is not None else ""
+
+                def launch_app() -> str:
+                    result = self.open_connected_app(app_key, project_name, log_result=False)
+                    message = str(result.get("message", "")).strip()
+                    if result.get("ok"):
+                        return message
+                    raise OSError(message or "App could not be opened.")
+
+                return self._guarded_action("app_launch", f"open {app_key}", launch_app)
+
+        return None
 
     def _project_context(self) -> str:
         project = self.projects.get_current_project()
@@ -144,9 +581,7 @@ class LunaEngine:
             lines.append("Recent project memory: " + " | ".join(project.memory_entries[:4]))
         if project.attachment_names:
             lines.append("Linked files: " + ", ".join(project.attachment_names[:6]))
-        lines.append(
-            "If the user asks a vague follow-up and no new project is explicitly introduced, assume they still mean this active project."
-        )
+        lines.append("If the user asks a vague follow-up and no new project is explicitly introduced, assume they still mean this active project.")
         return "\n".join(lines)
 
     def _remember_project_chat_focus(self, user_input: str, response: str) -> None:
@@ -154,9 +589,7 @@ class LunaEngine:
         if project is None:
             return
         cleaned_input = " ".join(user_input.strip().split())
-        if not cleaned_input:
-            return
-        if cleaned_input.startswith("/"):
+        if not cleaned_input or cleaned_input.startswith("/"):
             return
         note = cleaned_input[:140]
         if len(cleaned_input) > 140:
@@ -224,13 +657,25 @@ class LunaEngine:
         cleaned_input = user_input.strip()
         if not cleaned_input:
             return ""
-
         if cleaned_input.lower() == "exit":
             return "Luna: Goodbye."
+
+        pending_action_result = self._handle_pending_action_command(cleaned_input)
+        if pending_action_result is not None:
+            self.memory_coordinator.remember_user_input(cleaned_input, "action")
+            self.memory_coordinator.save_exchange(cleaned_input, pending_action_result)
+            return pending_action_result
 
         internet_result = self._handle_internet_command(cleaned_input)
         if internet_result is not None:
             return internet_result
+
+        local_action_result = self._try_local_action(cleaned_input)
+        if local_action_result is not None:
+            self.memory_coordinator.remember_user_input(cleaned_input, "action")
+            self.memory_coordinator.save_exchange(cleaned_input, local_action_result)
+            self._remember_project_chat_focus(cleaned_input, local_action_result)
+            return local_action_result
 
         workflow_data = self.workflow.process(cleaned_input, self.memory.load_history())
         if workflow_data["system_message"]:
@@ -309,7 +754,6 @@ class LunaEngine:
         project = self.projects.get_project(project_id)
         if project is None:
             return {"ok": False, "message": "Project could not be found."}
-
         result = self.desktop_actions.run_task_action(
             project_name=project.name,
             brief=project.brief,
@@ -319,6 +763,7 @@ class LunaEngine:
         )
         self.projects.update_task_status(project_id, task_title, result.get("status", "completed"))
         self.projects.add_memory_entry(project_id, result.get("message", "Task agent ran an action."))
+        self._log_action("file_change", f"task action: {task_title}", result.get("status", "completed"), result.get("message", "Task agent ran an action."))
         updated = self.projects.get_project(project_id)
         return {
             "ok": True,
@@ -327,12 +772,15 @@ class LunaEngine:
             "project": self._serialize_project(updated),
         }
 
-    def open_connected_app(self, app_key: str, project_name: str = "") -> dict[str, str | bool]:
-        return self.desktop_actions.launch_connected_app(
+    def open_connected_app(self, app_key: str, project_name: str = "", log_result: bool = True) -> dict[str, str | bool]:
+        result = self.desktop_actions.launch_connected_app(
             app_key=app_key,
             workspace_settings=self.user_settings.data,
             project_name=project_name,
         )
+        status = "completed" if result.get("ok") else "failed"
+        self._log_action("app_launch", f"open {app_key}", status, str(result.get("message", "")))
+        return result
 
     def add_project_memory(self, project_id: str, note: str) -> dict[str, object] | None:
         updated = self.projects.add_memory_entry(project_id, note)
@@ -348,7 +796,6 @@ class LunaEngine:
     def read_attachment_context(self, file_paths: list[str]) -> str:
         if not file_paths:
             return ""
-
         allowed_suffixes = {".txt", ".md", ".py", ".json", ".yaml", ".yml", ".csv", ".log", ".ini", ".toml", ".js", ".ts", ".tsx", ".jsx", ".html", ".css"}
         parts: list[str] = []
         for raw_path in file_paths[:4]:
@@ -374,14 +821,7 @@ class LunaEngine:
     def generate_project_package(self, user_input: str, project_name: str = "") -> dict[str, object]:
         result = self.xeno.project_builder.build_from_request(user_input)
         blueprint_text = self.xeno.handle(user_input)
-        tasks = [
-            {
-                "title": step.title,
-                "status": step.status,
-                "description": step.description,
-            }
-            for step in (result.agent_run.steps if result.agent_run else [])
-        ]
+        tasks = [{"title": step.title, "status": step.status, "description": step.description} for step in (result.agent_run.steps if result.agent_run else [])]
         resolved_name = project_name.strip() or result.blueprint.project_name
         current = self.projects.get_current_project()
         if current is None:
@@ -423,17 +863,16 @@ class LunaEngine:
     def run(self) -> None:
         print("LunaAI launched. Type 'exit' to quit.")
         print("Luna is ready. Just write naturally and it will choose the right style automatically.")
-
         while True:
             user_input = input("Ty: ").strip()
             if not user_input:
                 continue
-
             response = self.chat(user_input)
             if not response:
                 continue
-
             print(response)
             if user_input.lower() == "exit":
                 break
+
+
 

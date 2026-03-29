@@ -1,4 +1,4 @@
-﻿from app.xeno.models import BuilderResult, ProjectBlueprint
+from app.xeno.models import BuilderResult, ProjectBlueprint
 from app.xeno.planner import XenoPlanner
 from app.xeno.task_agent import TaskAgent
 
@@ -18,27 +18,44 @@ class ProjectBuilder:
         blueprint = self.planner.create_blueprint(project_name=project_name, goal=goal)
         agent_run = self.task_agent.create_run(blueprint)
         summary = (
-            f"Xeno prepared a starter blueprint for '{blueprint.project_name}' "
-            f"with {len(blueprint.tasks)} initial tasks, {len(blueprint.folders)} folders, "
-            f"and an execution agent ready to drive the next steps."
+            f"Xeno prepared a {blueprint.difficulty} difficulty blueprint for '{blueprint.project_name}' "
+            f"as a {blueprint.project_type} project, with {len(blueprint.tasks)} structured tasks, "
+            f"{len(blueprint.milestones)} milestones, and a stronger execution track for the agent layer."
         )
-        next_step = (
-            "Confirm the project goal, preferred stack, and first shippable feature, "
-            "then Xeno can turn the agent plan into a sharper execution track."
+        next_step = agent_run.recommended_next_action or (
+            "Confirm the first milestone and let the task agent prepare the local workspace."
         )
-        return BuilderResult(summary=summary, blueprint=blueprint, next_step=next_step, agent_run=agent_run)
+        xeno_note = (
+            f"Xeno classified this as a {blueprint.project_type} request and tightened the plan around a {blueprint.difficulty} difficulty execution path."
+        )
+        return BuilderResult(
+            summary=summary,
+            blueprint=blueprint,
+            next_step=next_step,
+            agent_run=agent_run,
+            xeno_note=xeno_note,
+        )
 
     def format_blueprint(self, blueprint: ProjectBlueprint) -> str:
-        requirements = ", ".join(item.name for item in blueprint.requirements)
-        tasks = " | ".join(task.title for task in blueprint.tasks)
+        requirements = ", ".join(f"{item.name} ({item.priority})" for item in blueprint.requirements)
+        tasks = " | ".join(f"{task.title} [{task.tool}]" for task in blueprint.tasks)
         stack = ", ".join(blueprint.suggested_stack)
+        milestones = " | ".join(blueprint.milestones)
+        risks = " | ".join(blueprint.risks)
+        notes = " | ".join(blueprint.execution_notes)
         return (
             f"Project: {blueprint.project_name}\n"
             f"Goal: {blueprint.goal}\n"
+            f"Type: {blueprint.project_type}\n"
+            f"Difficulty: {blueprint.difficulty}\n"
             f"Stack: {stack}\n"
             f"Folders: {', '.join(blueprint.folders)}\n"
+            f"Core files: {', '.join(blueprint.core_files)}\n"
             f"Requirements: {requirements}\n"
-            f"Tasks: {tasks}"
+            f"Tasks: {tasks}\n"
+            f"Milestones: {milestones}\n"
+            f"Risks: {risks}\n"
+            f"Execution notes: {notes}"
         )
 
     def _guess_project_name(self, user_input: str) -> str:

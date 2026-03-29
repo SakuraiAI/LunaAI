@@ -1,4 +1,4 @@
-import html
+﻿import html
 import os
 import platform
 import re
@@ -8,8 +8,8 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from PySide6.QtCore import QEasingCurve, QObject, QParallelAnimationGroup, QPropertyAnimation, Qt, QThread, QTimer, QSize, Signal, Slot
-from PySide6.QtGui import QCloseEvent, QColor, QCursor, QIcon, QKeyEvent, QPainter, QPainterPath, QPixmap, QTextCursor
+from PySide6.QtCore import QEasingCurve, QObject, QParallelAnimationGroup, QPropertyAnimation, Qt, QThread, QTimer, QSize, Signal, Slot, QUrl
+from PySide6.QtGui import QCloseEvent, QColor, QCursor, QDesktopServices, QIcon, QKeyEvent, QPainter, QPainterPath, QPixmap, QTextCursor
 from PySide6.QtWidgets import (
     QApplication,
     QCheckBox,
@@ -158,7 +158,8 @@ class ResponseWorker(QObject):
 
 
 class MessageBubble(QFrame):
-    url_pattern = re.compile(r"(https?://[^\s<]+)")
+    link_pattern = re.compile(r"https?://[^\s<]+|[A-Za-z]:[\\/][^\s<]+")
+    _trailing_link_chars = ".,;:!?)]}\"'"
 
     def __init__(self, sender: str, text: str, is_user: bool = False) -> None:
         super().__init__()
@@ -172,10 +173,13 @@ class MessageBubble(QFrame):
         if is_user:
             row.addStretch()
 
-        bubble = QFrame()
-        bubble.setObjectName("userBubble" if is_user else "aiBubble")
-        bubble.setMaximumWidth(720 if is_user else 820)
-        bubble.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
+        self.is_user = is_user
+        self.bubble = QFrame()
+        self.bubble.setObjectName("userBubble" if is_user else "aiBubble")
+        self.bubble.setMaximumWidth(720 if is_user else 820)
+        self.bubble.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
+
+        bubble = self.bubble
 
         bubble_layout = QVBoxLayout(bubble)
         bubble_layout.setContentsMargins(20, 16, 20, 16)
@@ -192,7 +196,8 @@ class MessageBubble(QFrame):
         self.text_label.setTextInteractionFlags(
             Qt.TextInteractionFlag.TextSelectableByMouse | Qt.TextInteractionFlag.LinksAccessibleByMouse
         )
-        self.text_label.setOpenExternalLinks(True)
+        self.text_label.setOpenExternalLinks(False)
+        self.text_label.linkActivated.connect(self._handle_link)
         self.text_label.setCursor(QCursor(Qt.CursorShape.IBeamCursor))
         self.text_label.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
         self.text_label.setText(self._format_text(text))
@@ -205,19 +210,78 @@ class MessageBubble(QFrame):
         if not is_user:
             row.addStretch()
 
+    def _clean_link_target(self, raw_link: str) -> tuple[str, str]:
+        clean_link = raw_link.rstrip(self._trailing_link_chars)
+        trailing = raw_link[len(clean_link):]
+        return clean_link, trailing
+
+    def _linkify_block(self, block: str) -> str:
+        parts: list[str] = []
+        last_index = 0
+        for match in self.link_pattern.finditer(block):
+            match_start, match_end = match.span()
+            parts.append(html.escape(block[last_index:match_start]))
+            raw_link = match.group(0)
+            clean_link, trailing = self._clean_link_target(raw_link)
+            if not clean_link:
+                parts.append(html.escape(raw_link))
+                last_index = match_end
+                continue
+            display_text = html.escape(clean_link)
+            if clean_link.lower().startswith(("http://", "https://")):
+                href = clean_link
+            else:
+                href = QUrl.fromLocalFile(clean_link.replace("\\", "/")).toString()
+            parts.append(f'<a href="{html.escape(href, quote=True)}">{display_text}</a>')
+            if trailing:
+                parts.append(html.escape(trailing))
+            last_index = match_end
+        parts.append(html.escape(block[last_index:]))
+        return "".join(parts).replace("\n", "<br>")
+
     def _format_text(self, text: str) -> str:
         paragraphs: list[str] = []
         for block in text.strip().split("\n\n"):
-            escaped = html.escape(block).replace("\n", "<br>")
-            linked = self.url_pattern.sub(r'<a href="\1">\1</a>', escaped)
+            linked = self._linkify_block(block)
             paragraphs.append(f'<div style="margin: 0 0 12px 0;">{linked}</div>')
         if not paragraphs:
             return ""
         return "".join(paragraphs)
 
+    def _handle_link(self, href: str) -> None:
+        href, _ = self._clean_link_target(href)
+        try:
+            if href.lower().startswith(("http://", "https://")):
+                QDesktopServices.openUrl(QUrl(href))
+                return
+            url = QUrl(href)
+            if url.isLocalFile():
+                local_file = url.toLocalFile()
+                if local_file:
+                    os.startfile(local_file)
+                    return
+            if re.match(r"^[A-Za-z]:[\\/]", href):
+                os.startfile(href)
+                return
+            QDesktopServices.openUrl(QUrl(href))
+        except OSError:
+            QMessageBox.warning(self, "Open link", f"This link could not be opened:\n{href}")
+
     def set_text(self, text: str) -> None:
         self._raw_text = text
+        clean_text = text.strip()
+        if clean_text:
+            if self.is_user:
+                target_width = 240 if len(clean_text) < 90 else 320
+            else:
+                target_width = 320 if len(clean_text) < 140 else 420
+            self.bubble.setMinimumWidth(target_width)
+        else:
+            self.bubble.setMinimumWidth(0)
         self.text_label.setText(self._format_text(text))
+        self.text_label.adjustSize()
+        self.bubble.adjustSize()
+        self.adjustSize()
 
 
 class TypingBubble(QFrame):
@@ -639,6 +703,9 @@ class LunaMainWindow(QMainWindow):
         self.sidebar_visible = True
         self.sidebar_animation: QParallelAnimationGroup | None = None
         self.chat_transition_animation: QParallelAnimationGroup | None = None
+        self._chat_list_cache: tuple[str, tuple[tuple[str, str], ...]] | None = None
+        self._project_list_cache: tuple[str, tuple[tuple[str, str], ...]] | None = None
+        self._action_log_cache = ""
 
         self.setWindowTitle("LunaAI")
         self.resize(1440, 920)
@@ -665,7 +732,7 @@ class LunaMainWindow(QMainWindow):
         self._load_project_into_studio(self.engine.get_project(current_project.id) if current_project is not None else None)
         self._update_empty_state()
         self.switch_page(0)
-        QTimer.singleShot(0, self._scroll_chat_to_bottom)
+        self._schedule_scroll_to_bottom()
 
     def _make_logo_label(self, size: int, object_name: str) -> QLabel:
         label = QLabel()
@@ -1082,6 +1149,28 @@ class LunaMainWindow(QMainWindow):
         self.attachment_layout.setSpacing(8)
         self.attachment_row.hide()
 
+        self.pending_action_row = QFrame()
+        self.pending_action_row.setObjectName("pendingActionRow")
+        pending_action_layout = QHBoxLayout(self.pending_action_row)
+        pending_action_layout.setContentsMargins(24, 8, 24, 0)
+        pending_action_layout.setSpacing(12)
+
+        self.pending_action_confirm_button = QPushButton("Accept")
+        self.pending_action_confirm_button.setObjectName("sendButton")
+        self.pending_action_confirm_button.setProperty("compact", True)
+        self.pending_action_confirm_button.clicked.connect(self.confirm_pending_action)
+
+        self.pending_action_cancel_button = QPushButton("Cancel")
+        self.pending_action_cancel_button.setObjectName("secondaryButton")
+        self.pending_action_cancel_button.setProperty("compact", True)
+        self.pending_action_cancel_button.clicked.connect(self.cancel_pending_action)
+
+        pending_action_layout.addStretch(1)
+        pending_action_layout.addWidget(self.pending_action_confirm_button)
+        pending_action_layout.addWidget(self.pending_action_cancel_button)
+        pending_action_layout.addStretch(1)
+        self.pending_action_row.hide()
+
         self.composer_shell = QFrame()
         self.composer_shell.setObjectName("composerShell")
         composer_layout = QHBoxLayout(self.composer_shell)
@@ -1114,6 +1203,7 @@ class LunaMainWindow(QMainWindow):
 
         layout.addWidget(self.chat_stack, 1)
         layout.addWidget(self.attachment_row)
+        layout.addWidget(self.pending_action_row)
         layout.addWidget(self.composer_shell)
         return page
 
@@ -1665,7 +1755,12 @@ class LunaMainWindow(QMainWindow):
         runtime_page = QWidget()
         runtime_layout = QVBoxLayout(runtime_page)
         runtime_layout.setContentsMargins(0, 0, 0, 0)
-        runtime_layout.setSpacing(16)
+        runtime_layout.setSpacing(0)
+
+        runtime_body = QWidget()
+        runtime_body_layout = QVBoxLayout(runtime_body)
+        runtime_body_layout.setContentsMargins(0, 0, 8, 0)
+        runtime_body_layout.setSpacing(16)
 
         intro = QLabel("Control how Luna connects, thinks, and works with the local backend.")
         intro.setObjectName("subtitleLabel")
@@ -1700,16 +1795,45 @@ class LunaMainWindow(QMainWindow):
         self.settings_internet_mode.setObjectName("settingsSelect")
         self.settings_internet_mode.addItems(["auto", "manual"])
 
+        self.settings_agent_mode = QComboBox()
+        self.settings_agent_mode.setObjectName("settingsSelect")
+        self.settings_agent_mode.addItems(["ask", "auto", "block"])
+
+        self.settings_allow_app_launch = QCheckBox("Allow Luna and agents to launch connected apps")
+        self.settings_allow_app_launch.setObjectName("settingsCheck")
+        self.settings_allow_path_open = QCheckBox("Allow Luna and agents to open local files and folders")
+        self.settings_allow_path_open.setObjectName("settingsCheck")
+        self.settings_allow_file_changes = QCheckBox("Allow Luna and agents to create or modify local files")
+        self.settings_allow_file_changes.setObjectName("settingsCheck")
+
+        self.settings_action_log = QTextEdit()
+        self.settings_action_log.setObjectName("studioOutput")
+        self.settings_action_log.setReadOnly(True)
+        self.settings_action_log.setMinimumHeight(220)
+
         connection_layout.addWidget(self._make_settings_field("API URL", self.settings_url, "The endpoint Luna uses to reach LM Studio or another compatible backend."))
         connection_layout.addWidget(self._make_settings_field("API Token", self.settings_token, "Stored locally for this workspace."))
         connection_layout.addWidget(self._make_settings_field("Request timeout", self.settings_timeout, "Increase this if your model loads slowly or replies take longer."))
         connection_layout.addWidget(self._make_settings_field("Default reasoning style", self.settings_reasoning_box))
         connection_layout.addWidget(self.settings_internet_enabled)
         connection_layout.addWidget(self._make_settings_field("Internet mode", self.settings_internet_mode))
+        connection_layout.addWidget(self._make_settings_field("Agent execution mode", self.settings_agent_mode, "Ask = require confirmation, Auto = run immediately, Block = refuse local actions."))
+        connection_layout.addWidget(self.settings_allow_app_launch)
+        connection_layout.addWidget(self.settings_allow_path_open)
+        connection_layout.addWidget(self.settings_allow_file_changes)
+        connection_layout.addWidget(self._make_settings_field("Recent agent actions", self.settings_action_log, "Every local action is stored locally so you can see what Luna or agents actually did."))
 
-        runtime_layout.addWidget(intro)
-        runtime_layout.addWidget(connection_card)
-        runtime_layout.addStretch()
+        runtime_body_layout.addWidget(intro)
+        runtime_body_layout.addWidget(connection_card)
+        runtime_body_layout.addStretch()
+
+        runtime_scroll = QScrollArea()
+        runtime_scroll.setObjectName("settingsScroll")
+        runtime_scroll.setWidgetResizable(True)
+        runtime_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        runtime_scroll.setWidget(runtime_body)
+
+        runtime_layout.addWidget(runtime_scroll, 1)
 
         apps_page = QWidget()
         apps_layout_page = QVBoxLayout(apps_page)
@@ -1817,7 +1941,12 @@ class LunaMainWindow(QMainWindow):
         accounts_page = QWidget()
         accounts_layout_page = QVBoxLayout(accounts_page)
         accounts_layout_page.setContentsMargins(0, 0, 0, 0)
-        accounts_layout_page.setSpacing(16)
+        accounts_layout_page.setSpacing(0)
+
+        accounts_body = QWidget()
+        accounts_body_layout = QVBoxLayout(accounts_body)
+        accounts_body_layout.setContentsMargins(0, 0, 8, 0)
+        accounts_body_layout.setSpacing(16)
 
         accounts_intro = QLabel("Local account links and identity settings for future integrations.")
         accounts_intro.setObjectName("subtitleLabel")
@@ -1845,9 +1974,17 @@ class LunaMainWindow(QMainWindow):
         accounts_layout.addWidget(self._make_settings_field("GitHub token", self.settings_github_token))
         accounts_layout.addWidget(self._make_settings_field("Google account", self.settings_google_email))
 
-        accounts_layout_page.addWidget(accounts_intro)
-        accounts_layout_page.addWidget(accounts_card)
-        accounts_layout_page.addStretch()
+        accounts_body_layout.addWidget(accounts_intro)
+        accounts_body_layout.addWidget(accounts_card)
+        accounts_body_layout.addStretch()
+
+        accounts_scroll = QScrollArea()
+        accounts_scroll.setObjectName("settingsScroll")
+        accounts_scroll.setWidgetResizable(True)
+        accounts_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        accounts_scroll.setWidget(accounts_body)
+
+        accounts_layout_page.addWidget(accounts_scroll, 1)
 
         self.settings_stack.addWidget(runtime_page)
         self.settings_stack.addWidget(apps_page)
@@ -1924,6 +2061,12 @@ class LunaMainWindow(QMainWindow):
             if chat.get("id") == current_chat_id:
                 self.chat_list.setCurrentItem(item)
 
+    def _schedule_scroll_to_bottom(self) -> None:
+        self._scroll_chat_to_bottom()
+        QTimer.singleShot(0, self._scroll_chat_to_bottom)
+        QTimer.singleShot(40, self._scroll_chat_to_bottom)
+        QTimer.singleShot(120, self._scroll_chat_to_bottom)
+
     def _load_history(self) -> None:
         self.chat_area.clear_messages()
         history = self.engine.memory.load_history()
@@ -1938,7 +2081,8 @@ class LunaMainWindow(QMainWindow):
                 cleaned = content.removeprefix("Luna: ") if content.startswith("Luna: ") else content
                 self.chat_area.add_message("Luna", cleaned, False)
         self._update_empty_state()
-        self._scroll_chat_to_bottom()
+        self._refresh_pending_action_bar()
+        self._schedule_scroll_to_bottom()
 
     def _on_chat_selected(self, item: QListWidgetItem) -> None:
         if self.worker_thread is not None or self.reveal_timer is not None:
@@ -1950,6 +2094,8 @@ class LunaMainWindow(QMainWindow):
         self.switch_page(0)
         self._load_history()
         self._refresh_chat_list()
+        self._schedule_scroll_to_bottom()
+        QTimer.singleShot(220, self._scroll_chat_to_bottom)
     def create_chat(self) -> None:
         if self.worker_thread is not None or self.reveal_timer is not None:
             return
@@ -2136,6 +2282,30 @@ class LunaMainWindow(QMainWindow):
             row_layout.addStretch()
             row.show()
 
+    def _refresh_pending_action_bar(self) -> None:
+        if not hasattr(self, "pending_action_row"):
+            return
+        title = self.engine.get_pending_action_title() if hasattr(self.engine, "get_pending_action_title") else ""
+        has_pending = bool(title)
+        self.pending_action_row.setVisible(has_pending and self.chat_stack.currentIndex() == 1)
+
+    def _run_pending_action_from_ui(self, confirm: bool) -> None:
+        if self.worker_thread is not None or self.reveal_timer is not None:
+            return
+        response = self.engine.confirm_pending_action() if confirm else self.engine.cancel_pending_action()
+        self._load_history()
+        self._refresh_chat_list()
+        self._refresh_action_log_view()
+        self._refresh_pending_action_bar()
+        self._set_busy(False, "LunaAI")
+        self._schedule_scroll_to_bottom()
+
+    def confirm_pending_action(self) -> None:
+        self._run_pending_action_from_ui(True)
+
+    def cancel_pending_action(self) -> None:
+        self._run_pending_action_from_ui(False)
+
     def _clear_attachments(self) -> None:
         self.pending_attachments.clear()
         self._refresh_attachment_rows()
@@ -2206,6 +2376,14 @@ class LunaMainWindow(QMainWindow):
         self._load_project_into_studio(updated)
         self._refresh_project_list()
 
+    def _refresh_action_log_view(self, force: bool = False) -> None:
+        if not hasattr(self, "settings_action_log"):
+            return
+        text = self.engine.format_recent_actions()
+        if force or text != self._action_log_cache:
+            self._action_log_cache = text
+            self.settings_action_log.setPlainText(text)
+
     def _load_settings_values(self) -> None:
         settings = self.engine.settings
         workspace = self.engine.user_settings.data
@@ -2215,6 +2393,10 @@ class LunaMainWindow(QMainWindow):
         self.settings_reasoning_box.setCurrentText(settings.default_reasoning_box)
         self.settings_internet_enabled.setChecked(bool(settings.internet_enabled))
         self.settings_internet_mode.setCurrentText(settings.internet_mode)
+        self.settings_agent_mode.setCurrentText(workspace.agent_execution_mode)
+        self.settings_allow_app_launch.setChecked(bool(workspace.allow_app_launch))
+        self.settings_allow_path_open.setChecked(bool(workspace.allow_path_open))
+        self.settings_allow_file_changes.setChecked(bool(workspace.allow_file_changes))
         self.settings_unreal_path.setText(workspace.unreal_engine_path)
         self.settings_blender_path.setText(workspace.blender_path)
         self.settings_flstudio_path.setText(workspace.fl_studio_path)
@@ -2229,7 +2411,7 @@ class LunaMainWindow(QMainWindow):
         self.settings_github_username.setText(workspace.github_username)
         self.settings_github_token.setText(workspace.github_token)
         self.settings_google_email.setText(workspace.google_email)
-
+        self._refresh_action_log_view(force=True)
 
     def _save_settings(self) -> None:
         base_url = self.settings_url.text().strip()
@@ -2238,6 +2420,10 @@ class LunaMainWindow(QMainWindow):
         reasoning_box = self.settings_reasoning_box.currentText().strip()
         internet_enabled = self.settings_internet_enabled.isChecked()
         internet_mode = self.settings_internet_mode.currentText().strip()
+        agent_mode = self.settings_agent_mode.currentText().strip()
+        allow_app_launch = self.settings_allow_app_launch.isChecked()
+        allow_path_open = self.settings_allow_path_open.isChecked()
+        allow_file_changes = self.settings_allow_file_changes.isChecked()
 
         if not base_url:
             QMessageBox.information(self, "Settings", "API URL is required.")
@@ -2289,7 +2475,12 @@ class LunaMainWindow(QMainWindow):
         workspace.github_username = self.settings_github_username.text().strip()
         workspace.github_token = self.settings_github_token.text().strip()
         workspace.google_email = self.settings_google_email.text().strip()
+        workspace.agent_execution_mode = agent_mode
+        workspace.allow_app_launch = allow_app_launch
+        workspace.allow_path_open = allow_path_open
+        workspace.allow_file_changes = allow_file_changes
         self.engine.user_settings.save(workspace)
+        self._refresh_action_log_view(force=True)
 
         self.settings_status.setText("Settings saved locally and applied to the current Luna session.")
 
@@ -2435,7 +2626,7 @@ class LunaMainWindow(QMainWindow):
         self.chat_transition_animation.start()
 
     def _update_empty_state(self) -> None:
-        has_history = bool(self.engine.memory.load_history())
+        has_history = self.chat_area.chat_layout.count() > 1 or self.pending_thinking is not None or self.reveal_bubble is not None
         self.chat_stack.setCurrentIndex(1 if has_history else 0)
         self.empty_state_opacity.setOpacity(1.0)
         self.chat_scroll_opacity.setOpacity(1.0)
@@ -2444,6 +2635,7 @@ class LunaMainWindow(QMainWindow):
             self.attachment_row.show()
         else:
             self.attachment_row.hide()
+        self._refresh_pending_action_bar()
 
     def _scroll_chat_to_bottom(self) -> None:
         scrollbar = self.chat_scroll.verticalScrollBar()
@@ -2857,6 +3049,24 @@ class LunaMainWindow(QMainWindow):
                 border-radius: 16px;
             }}
 
+            #pendingActionRow {{
+                background: transparent;
+                border: none;
+                margin: 2px 24px 0 24px;
+            }}
+
+            #pendingActionRow #secondaryButton[compact="true"] {{
+                min-width: 112px;
+                min-height: 44px;
+                text-align: center;
+            }}
+
+            #pendingActionRow #sendButton[compact="true"] {{
+                min-width: 128px;
+                min-height: 44px;
+                padding: 0 20px;
+            }}
+
             #attachmentPreview {{
                 background: #2a2a2a;
                 border: 1px solid #353535;
@@ -3139,6 +3349,17 @@ class LunaDesktopApp:
         self.window = LunaMainWindow(self.engine)
         self.window.show()
         app.exec()
+
+
+
+
+
+
+
+
+
+
+
 
 
 

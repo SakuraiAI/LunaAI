@@ -1,4 +1,4 @@
-﻿from app.xeno.project_builder import ProjectBuilder
+from app.xeno.project_builder import ProjectBuilder
 from app.xeno.planner import XenoPlanner
 from app.xeno.task_agent import TaskAgent
 
@@ -17,7 +17,7 @@ class XenoCoordinator:
     def describe(self) -> str:
         return (
             "Xeno is Luna's sister system inside the same platform. "
-            "She focuses on planning, project building, architecture, and turning ideas into structured execution steps through a task agent."
+            "She focuses on planning, architecture, research structure, execution strategy, and turning requests into agent-ready action tracks."
         )
 
     def should_consult(self, user_input: str) -> bool:
@@ -31,13 +31,17 @@ class XenoCoordinator:
 
         if self.planner.is_project_builder_request(user_input):
             result = self.project_builder.build_from_request(user_input)
-            step_titles = ", ".join(step.title for step in result.agent_run.steps[:3]) if result.agent_run else ""
+            step_titles = ", ".join(step.title for step in result.agent_run.steps[:4]) if result.agent_run else ""
             parts.append(
                 "Hidden Xeno support: advanced planning requested. "
                 f"Project focus: {result.blueprint.project_name}. "
-                f"Goal: {result.blueprint.goal}. "
+                f"Type: {result.blueprint.project_type}. "
+                f"Difficulty: {result.blueprint.difficulty}. "
+                f"Milestones: {' | '.join(result.blueprint.milestones[:3])}. "
                 f"Initial execution steps: {step_titles}."
             )
+            if result.blueprint.risks:
+                parts.append("Hidden Xeno risk notes: " + " | ".join(result.blueprint.risks[:2]))
 
         if self.task_agent.can_handle(user_input):
             parts.append(self.task_agent.create_action_support(user_input))
@@ -51,8 +55,8 @@ class XenoCoordinator:
         result = self.project_builder.build_from_request(user_input)
         blueprint_text = self.project_builder.format_blueprint(result.blueprint)
         agent_text = self.task_agent.format_run(result.agent_run) if result.agent_run else ""
-        parts = [result.summary, blueprint_text]
+        parts = [result.summary, result.xeno_note, blueprint_text]
         if agent_text:
             parts.append(agent_text)
         parts.append(f"Next step: {result.next_step}")
-        return "\n\n".join(parts)
+        return "\n\n".join(part for part in parts if part)

@@ -1,4 +1,4 @@
-﻿from datetime import datetime
+from datetime import datetime
 from zoneinfo import ZoneInfo
 
 from app.memory.chat_memory import ChatMemory
@@ -65,6 +65,11 @@ class PromptBuilder:
                 "\nInternet context: Use this live internet result when relevant and prefer it "
                 f"for up-to-date facts.\n{internet_context}"
             )
+        if project_context:
+            system_content += (
+                "\nActive project context: treat this as trusted local workspace context for the current conversation.\n"
+                f"{project_context}"
+            )
 
         messages: list[dict[str, str]] = [{"role": "system", "content": system_content}]
 
@@ -78,6 +83,7 @@ class PromptBuilder:
     def _history_for_prompt(self) -> list[dict[str, str]]:
         history = self.memory.load_history()
         filtered_history: list[dict[str, str]] = []
+        total_chars = 0
         blocked_fragments = [
             "lm studio returned http",
             "lm studio is not reachable",
@@ -90,20 +96,40 @@ class PromptBuilder:
             "401 error",
             "token for authentication",
         ]
+        action_noise = [
+            "mam akci pripravenou",
+            "pending approval for",
+            "cancelled ",
+            "created folder ",
+            "created file ",
+            "opened vs code",
+        ]
 
-        for msg in history:
+        for msg in reversed(history):
             content = msg.get("content", "")
             if not content:
                 continue
 
+            normalized = content.lower()
             if msg.get("role") == "assistant":
-                normalized = content.lower()
                 if any(fragment in normalized for fragment in blocked_fragments):
                     continue
+                if any(fragment in normalized for fragment in action_noise):
+                    continue
 
-            filtered_history.append(msg)
+            trimmed = content.strip()
+            if len(trimmed) > 900:
+                trimmed = trimmed[:900].rstrip() + "..."
+            total_chars += len(trimmed)
+            if total_chars > 3600:
+                continue
 
-        return filtered_history[-5:]
+            filtered_history.append({"role": msg.get("role", "user"), "content": trimmed})
+            if len(filtered_history) >= 6:
+                break
+
+        filtered_history.reverse()
+        return filtered_history
 
     def _time_context(self) -> str:
         now = datetime.now(self.timezone) if self.timezone else datetime.now()
