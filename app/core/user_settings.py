@@ -25,6 +25,11 @@ class UserWorkspaceSettings:
     allow_app_launch: bool = True
     allow_path_open: bool = True
     allow_file_changes: bool = True
+    cloud_enabled: bool = False
+    cloud_provider: str = "local_folder"
+    cloud_root_path: str = ""
+    cloud_account_email: str = ""
+    cloud_auto_sync: bool = False
 
 
 class UserSettingsStore:

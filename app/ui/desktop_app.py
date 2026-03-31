@@ -1,4 +1,4 @@
-﻿import html
+import html
 import os
 import platform
 import re
@@ -1948,9 +1948,89 @@ class LunaMainWindow(QMainWindow):
         accounts_body_layout.setContentsMargins(0, 0, 8, 0)
         accounts_body_layout.setSpacing(16)
 
-        accounts_intro = QLabel("Local account links and identity settings for future integrations.")
+        accounts_intro = QLabel("Cloud sources, digital library, and account links stay local here so Luna can use them as trusted context.")
         accounts_intro.setObjectName("subtitleLabel")
         accounts_intro.setWordWrap(True)
+
+        cloud_card, cloud_layout = self._make_settings_card(
+            "Cloud",
+            "Connect a local cloud-style folder or account reference that Luna can sync into the digital library.",
+        )
+
+        self.settings_cloud_enabled = QCheckBox("Enable cloud library sync")
+        self.settings_cloud_enabled.setObjectName("settingsCheck")
+
+        self.settings_cloud_provider = QComboBox()
+        self.settings_cloud_provider.setObjectName("settingsSelect")
+        self.settings_cloud_provider.addItems(["local_folder", "google_drive", "dropbox", "github"])
+
+        self.settings_cloud_root_path = QLineEdit()
+        self.settings_cloud_root_path.setObjectName("settingsInput")
+        self.settings_cloud_root_path.setPlaceholderText("Cloud root folder path")
+
+        cloud_path_row = QWidget()
+        cloud_path_row_layout = QHBoxLayout(cloud_path_row)
+        cloud_path_row_layout.setContentsMargins(0, 0, 0, 0)
+        cloud_path_row_layout.setSpacing(8)
+        cloud_path_row_layout.addWidget(self.settings_cloud_root_path, 1)
+        self.settings_cloud_browse_button = QPushButton("Browse")
+        self.settings_cloud_browse_button.setObjectName("secondaryButton")
+        self.settings_cloud_browse_button.setProperty("compact", True)
+        self.settings_cloud_browse_button.clicked.connect(lambda: self._browse_for_folder(self.settings_cloud_root_path, "Select cloud root folder"))
+        cloud_path_row_layout.addWidget(self.settings_cloud_browse_button)
+
+        self.settings_cloud_account_email = QLineEdit()
+        self.settings_cloud_account_email.setObjectName("settingsInput")
+        self.settings_cloud_account_email.setPlaceholderText("Cloud account email")
+
+        self.settings_cloud_auto_sync = QCheckBox("Auto-sync cloud folder into the digital library")
+        self.settings_cloud_auto_sync.setObjectName("settingsCheck")
+
+        self.settings_cloud_sync_button = QPushButton("Sync now")
+        self.settings_cloud_sync_button.setObjectName("secondaryButton")
+        self.settings_cloud_sync_button.clicked.connect(self.sync_cloud_library_from_ui)
+
+        cloud_layout.addWidget(self.settings_cloud_enabled)
+        cloud_layout.addWidget(self._make_settings_field("Cloud provider", self.settings_cloud_provider))
+        cloud_layout.addWidget(self._make_settings_field("Cloud root folder", cloud_path_row, "Luna can scan this folder and pull text files into the digital library."))
+        cloud_layout.addWidget(self._make_settings_field("Cloud account", self.settings_cloud_account_email, "Stored locally as a reference for the connected source."))
+        cloud_layout.addWidget(self.settings_cloud_auto_sync)
+        cloud_layout.addWidget(self.settings_cloud_sync_button, 0, Qt.AlignmentFlag.AlignLeft)
+
+        library_card, library_layout = self._make_settings_card(
+            "Digital library",
+            "Save notes, links, and files that Luna can use later as trusted local knowledge.",
+        )
+
+        self.library_list = QListWidget()
+        self.library_list.setObjectName("projectList")
+
+        library_actions = QHBoxLayout()
+        library_actions.setSpacing(8)
+        self.library_add_note_button = QPushButton("Add note")
+        self.library_add_note_button.setObjectName("secondaryButton")
+        self.library_add_note_button.setProperty("compact", True)
+        self.library_add_note_button.clicked.connect(self.add_library_note_from_ui)
+        self.library_add_link_button = QPushButton("Add link")
+        self.library_add_link_button.setObjectName("secondaryButton")
+        self.library_add_link_button.setProperty("compact", True)
+        self.library_add_link_button.clicked.connect(self.add_library_link_from_ui)
+        self.library_add_file_button = QPushButton("Add file")
+        self.library_add_file_button.setObjectName("secondaryButton")
+        self.library_add_file_button.setProperty("compact", True)
+        self.library_add_file_button.clicked.connect(self.add_library_file_from_ui)
+        self.library_remove_button = QPushButton("Remove")
+        self.library_remove_button.setObjectName("secondaryButton")
+        self.library_remove_button.setProperty("compact", True)
+        self.library_remove_button.clicked.connect(self.remove_selected_library_item)
+        library_actions.addWidget(self.library_add_note_button)
+        library_actions.addWidget(self.library_add_link_button)
+        library_actions.addWidget(self.library_add_file_button)
+        library_actions.addWidget(self.library_remove_button)
+        library_actions.addStretch(1)
+
+        library_layout.addWidget(self.library_list, 1)
+        library_layout.addLayout(library_actions)
 
         accounts_card, accounts_layout = self._make_settings_card(
             "Accounts",
@@ -1975,6 +2055,8 @@ class LunaMainWindow(QMainWindow):
         accounts_layout.addWidget(self._make_settings_field("Google account", self.settings_google_email))
 
         accounts_body_layout.addWidget(accounts_intro)
+        accounts_body_layout.addWidget(cloud_card)
+        accounts_body_layout.addWidget(library_card)
         accounts_body_layout.addWidget(accounts_card)
         accounts_body_layout.addStretch()
 
@@ -2376,6 +2458,73 @@ class LunaMainWindow(QMainWindow):
         self._load_project_into_studio(updated)
         self._refresh_project_list()
 
+    def _refresh_library_view(self) -> None:
+        if not hasattr(self, "library_list"):
+            return
+        self.library_list.clear()
+        for entry in self.engine.list_library_entries():
+            title = str(entry.get("title", "Library item"))
+            kind = str(entry.get("kind", "note")).replace("_", " ")
+            preview = str(entry.get("preview", "")).strip()
+            label = f"{title}\n{kind.title()}"
+            if preview:
+                label += f"\n{preview}"
+            item = QListWidgetItem(label)
+            item.setData(Qt.ItemDataRole.UserRole, str(entry.get("id", "")))
+            self.library_list.addItem(item)
+
+    def add_library_note_from_ui(self) -> None:
+        title, ok = QInputDialog.getText(self, "Digital library", "Note title:")
+        if not ok:
+            return
+        content, ok = QInputDialog.getMultiLineText(self, "Digital library", "Note content:")
+        if not ok or not content.strip():
+            return
+        self.engine.add_library_note(title.strip() or "Library note", content.strip())
+        self._refresh_library_view()
+        self.settings_status.setText("Digital library note saved locally.")
+
+    def add_library_link_from_ui(self) -> None:
+        url, ok = QInputDialog.getText(self, "Digital library", "Link URL:")
+        if not ok or not url.strip():
+            return
+        title, _ = QInputDialog.getText(self, "Digital library", "Optional title:")
+        self.engine.add_library_link(title.strip() or url.strip(), url.strip())
+        self._refresh_library_view()
+        self.settings_status.setText("Link saved into the digital library.")
+
+    def add_library_file_from_ui(self) -> None:
+        file_path, _ = QFileDialog.getOpenFileName(self, "Add file to digital library", str(Path.cwd()))
+        if not file_path:
+            return
+        result = self.engine.add_library_file(file_path)
+        if result is None:
+            QMessageBox.information(self, "Digital library", "That file could not be added.")
+            return
+        self._refresh_library_view()
+        self.settings_status.setText("File added to the digital library.")
+
+    def remove_selected_library_item(self) -> None:
+        if not hasattr(self, "library_list"):
+            return
+        item = self.library_list.currentItem()
+        if item is None:
+            QMessageBox.information(self, "Digital library", "Select a library item first.")
+            return
+        entry_id = item.data(Qt.ItemDataRole.UserRole)
+        if not isinstance(entry_id, str) or not entry_id:
+            return
+        if not self.engine.remove_library_entry(entry_id):
+            QMessageBox.information(self, "Digital library", "That item could not be removed.")
+            return
+        self._refresh_library_view()
+        self.settings_status.setText("Library item removed.")
+
+    def sync_cloud_library_from_ui(self) -> None:
+        message = self.engine.sync_cloud_library()
+        self._refresh_library_view()
+        self.settings_status.setText(message)
+
     def _refresh_action_log_view(self, force: bool = False) -> None:
         if not hasattr(self, "settings_action_log"):
             return
@@ -2411,7 +2560,13 @@ class LunaMainWindow(QMainWindow):
         self.settings_github_username.setText(workspace.github_username)
         self.settings_github_token.setText(workspace.github_token)
         self.settings_google_email.setText(workspace.google_email)
+        self.settings_cloud_enabled.setChecked(bool(workspace.cloud_enabled))
+        self.settings_cloud_provider.setCurrentText(workspace.cloud_provider or "local_folder")
+        self.settings_cloud_root_path.setText(workspace.cloud_root_path)
+        self.settings_cloud_account_email.setText(workspace.cloud_account_email)
+        self.settings_cloud_auto_sync.setChecked(bool(workspace.cloud_auto_sync))
         self._refresh_action_log_view(force=True)
+        self._refresh_library_view()
 
     def _save_settings(self) -> None:
         base_url = self.settings_url.text().strip()
@@ -2424,6 +2579,11 @@ class LunaMainWindow(QMainWindow):
         allow_app_launch = self.settings_allow_app_launch.isChecked()
         allow_path_open = self.settings_allow_path_open.isChecked()
         allow_file_changes = self.settings_allow_file_changes.isChecked()
+        cloud_enabled = self.settings_cloud_enabled.isChecked()
+        cloud_provider = self.settings_cloud_provider.currentText().strip()
+        cloud_root_path = self.settings_cloud_root_path.text().strip()
+        cloud_account_email = self.settings_cloud_account_email.text().strip()
+        cloud_auto_sync = self.settings_cloud_auto_sync.isChecked()
 
         if not base_url:
             QMessageBox.information(self, "Settings", "API URL is required.")
@@ -2475,12 +2635,18 @@ class LunaMainWindow(QMainWindow):
         workspace.github_username = self.settings_github_username.text().strip()
         workspace.github_token = self.settings_github_token.text().strip()
         workspace.google_email = self.settings_google_email.text().strip()
+        workspace.cloud_enabled = cloud_enabled
+        workspace.cloud_provider = cloud_provider
+        workspace.cloud_root_path = cloud_root_path
+        workspace.cloud_account_email = cloud_account_email
+        workspace.cloud_auto_sync = cloud_auto_sync
         workspace.agent_execution_mode = agent_mode
         workspace.allow_app_launch = allow_app_launch
         workspace.allow_path_open = allow_path_open
         workspace.allow_file_changes = allow_file_changes
         self.engine.user_settings.save(workspace)
         self._refresh_action_log_view(force=True)
+        self._refresh_library_view()
 
         self.settings_status.setText("Settings saved locally and applied to the current Luna session.")
 
@@ -2525,6 +2691,13 @@ class LunaMainWindow(QMainWindow):
             target.setText(file_path)
             target.setFocus()
 
+    def _browse_for_folder(self, target: QLineEdit, caption: str) -> None:
+        current_value = target.text().strip()
+        start_dir = str(Path(current_value)) if current_value and Path(current_value).exists() else str(Path.cwd())
+        folder_path = QFileDialog.getExistingDirectory(self, caption, start_dir)
+        if folder_path:
+            target.setText(folder_path)
+            target.setFocus()
     def _active_input(self) -> ExpandingMessageInput:
         if self.chat_stack.currentIndex() == 0:
             return self.empty_message_input
@@ -3349,6 +3522,13 @@ class LunaDesktopApp:
         self.window = LunaMainWindow(self.engine)
         self.window.show()
         app.exec()
+
+
+
+
+
+
+
 
 
 

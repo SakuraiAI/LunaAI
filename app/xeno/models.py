@@ -27,6 +27,9 @@ class AgentStep:
     output: str = ""
     risk: str = "low"
     dependencies: list[str] = field(default_factory=list)
+    action_ready: bool = False
+    action_hint: str = ""
+    handoff_note: str = ""
 
 
 @dataclass(slots=True)
@@ -37,6 +40,7 @@ class AgentRun:
     steps: list[AgentStep] = field(default_factory=list)
     execution_mode: str = "guided"
     recommended_next_action: str = ""
+    handoff_summary: str = ""
 
 
 @dataclass(slots=True)

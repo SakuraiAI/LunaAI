@@ -1,4 +1,4 @@
-﻿from dataclasses import dataclass
+from dataclasses import dataclass
 from pathlib import Path
 
 
@@ -10,6 +10,7 @@ MEMORY_PATH = "data/chats/chat_history.json"
 LONG_MEMORY_PATH = "data/chats/long_memory.json"
 USER_SETTINGS_PATH = "data/settings/user_settings.json"
 PROJECTS_PATH = "data/projects/projects.json"
+LIBRARY_PATH = "data/library/library.json"
 DEFAULT_WORKFLOW = "auto"
 DEFAULT_REASONING_BOX = "black_box"
 MEMORY_REVIEW_INTERVAL = 6
@@ -33,6 +34,7 @@ class AppSettings:
     long_memory_path: str = LONG_MEMORY_PATH
     user_settings_path: str = USER_SETTINGS_PATH
     projects_path: str = PROJECTS_PATH
+    library_path: str = LIBRARY_PATH
     default_workflow: str = DEFAULT_WORKFLOW
     default_reasoning_box: str = DEFAULT_REASONING_BOX
     memory_review_interval: int = MEMORY_REVIEW_INTERVAL
@@ -48,6 +50,7 @@ class AppSettings:
         Path(self.long_memory_path).parent.mkdir(parents=True, exist_ok=True)
         Path(self.user_settings_path).parent.mkdir(parents=True, exist_ok=True)
         Path(self.projects_path).parent.mkdir(parents=True, exist_ok=True)
+        Path(self.library_path).parent.mkdir(parents=True, exist_ok=True)
 
 
 __all__ = [
@@ -60,6 +63,7 @@ __all__ = [
     "LONG_MEMORY_PATH",
     "USER_SETTINGS_PATH",
     "PROJECTS_PATH",
+    "LIBRARY_PATH",
     "DEFAULT_WORKFLOW",
     "DEFAULT_REASONING_BOX",
     "MEMORY_REVIEW_INTERVAL",

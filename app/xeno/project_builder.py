@@ -17,6 +17,7 @@ class ProjectBuilder:
         goal = self._guess_goal(user_input)
         blueprint = self.planner.create_blueprint(project_name=project_name, goal=goal)
         agent_run = self.task_agent.create_run(blueprint)
+        handoff_summary = self.task_agent.create_handoff_summary(agent_run)
         summary = (
             f"Xeno prepared a {blueprint.difficulty} difficulty blueprint for '{blueprint.project_name}' "
             f"as a {blueprint.project_type} project, with {len(blueprint.tasks)} structured tasks, "
@@ -26,7 +27,8 @@ class ProjectBuilder:
             "Confirm the first milestone and let the task agent prepare the local workspace."
         )
         xeno_note = (
-            f"Xeno classified this as a {blueprint.project_type} request and tightened the plan around a {blueprint.difficulty} difficulty execution path."
+            f"Xeno classified this as a {blueprint.project_type} request, tightened the plan around a {blueprint.difficulty} difficulty execution path, "
+            f"and prepared an agent handoff. {handoff_summary}"
         )
         return BuilderResult(
             summary=summary,

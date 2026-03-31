@@ -32,6 +32,7 @@ class PromptBuilder:
         reasoning_box: str = "black_box",
         hidden_support: str = "",
         project_context: str = "",
+        library_context: str = "",
     ) -> list[dict[str, str]]:
         history = self._history_for_prompt()
         learning_memory = self.long_memory.summary()
@@ -69,6 +70,11 @@ class PromptBuilder:
             system_content += (
                 "\nActive project context: treat this as trusted local workspace context for the current conversation.\n"
                 f"{project_context}"
+            )
+        if library_context:
+            system_content += (
+                "\nDigital library context: use these trusted local notes, files, and saved sources when they help answer the request.\n"
+                f"{library_context}"
             )
 
         messages: list[dict[str, str]] = [{"role": "system", "content": system_content}]

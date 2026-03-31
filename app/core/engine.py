@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 from pathlib import Path
 from typing import Callable
@@ -7,6 +7,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from config.settings import AppSettings
 from app.core.action_log import ActionLogStore
+from app.core.library_store import LibraryStore
 from app.core.memory_coordinator import MemoryCoordinator
 from app.core.prompt_builder import PromptBuilder
 from app.core.project_store import ProjectStore
@@ -40,6 +41,7 @@ class LunaEngine:
         self.xeno = XenoCoordinator()
         self.user_settings = UserSettingsStore(Path(self.settings.user_settings_path))
         self.projects = ProjectStore(Path(self.settings.projects_path))
+        self.library = LibraryStore(Path(self.settings.library_path))
         self.action_log = ActionLogStore(Path("data/logs/action_log.jsonl"))
         self.pending_action: tuple[str, str, Callable[[], str]] | None = None
 
@@ -584,6 +586,12 @@ class LunaEngine:
         lines.append("If the user asks a vague follow-up and no new project is explicitly introduced, assume they still mean this active project.")
         return "\n".join(lines)
 
+    def _library_context(self, user_input: str) -> str:
+        workspace = self.user_settings.data
+        if bool(workspace.cloud_enabled) and bool(workspace.cloud_auto_sync) and workspace.cloud_root_path.strip():
+            self.library.sync_folder(workspace.cloud_root_path.strip())
+        return self.library.relevant_context(user_input)
+
     def _remember_project_chat_focus(self, user_input: str, response: str) -> None:
         project = self.projects.get_current_project()
         if project is None:
@@ -619,6 +627,7 @@ class LunaEngine:
         reasoning_box: str = "black_box",
         hidden_support: str = "",
         project_context: str = "",
+        library_context: str = "",
     ) -> list[dict[str, str]]:
         return self.prompt_builder.build(
             user_input=user_input,
@@ -629,6 +638,7 @@ class LunaEngine:
             reasoning_box=reasoning_box,
             hidden_support=hidden_support,
             project_context=project_context,
+            library_context=library_context,
         )
 
     def build_messages(
@@ -641,6 +651,7 @@ class LunaEngine:
         reasoning_box: str = "black_box",
         hidden_support: str = "",
         project_context: str = "",
+        library_context: str = "",
     ) -> list[dict[str, str]]:
         return self.build_prompt(
             user_input=user_input,
@@ -651,6 +662,7 @@ class LunaEngine:
             reasoning_box=reasoning_box,
             hidden_support=hidden_support,
             project_context=project_context,
+            library_context=library_context,
         )
 
     def chat(self, user_input: str) -> str:
@@ -687,6 +699,7 @@ class LunaEngine:
         internet_context = self._internet_context(workflow_data["user_input"])
         hidden_support = self._hidden_xeno_support(workflow_data["user_input"])
         project_context = self._project_context()
+        library_context = self._library_context(workflow_data["user_input"])
         messages = self.build_messages(
             user_input=workflow_data["user_input"],
             mode=workflow_data["mode"],
@@ -696,6 +709,7 @@ class LunaEngine:
             reasoning_box=workflow_data.get("reasoning_box", self.settings.default_reasoning_box),
             hidden_support=hidden_support,
             project_context=project_context,
+            library_context=library_context,
         )
 
         response = self.model.generate(messages)
@@ -726,6 +740,57 @@ class LunaEngine:
 
     def get_current_chat_title(self) -> str:
         return self.memory.get_current_session_title()
+
+
+    def list_library_entries(self) -> list[dict[str, str]]:
+        return self.library.list_entries()
+
+    def add_library_note(self, title: str, content: str, tags: list[str] | None = None) -> dict[str, str]:
+        entry = self.library.add_note(title, content, tags)
+        return {
+            "id": entry.id,
+            "title": entry.title,
+            "kind": entry.kind,
+            "source": entry.source,
+            "preview": entry.content[:120],
+        }
+
+    def add_library_link(self, title: str, url: str, tags: list[str] | None = None) -> dict[str, str]:
+        entry = self.library.add_link(title, url, tags)
+        return {
+            "id": entry.id,
+            "title": entry.title,
+            "kind": entry.kind,
+            "source": entry.source,
+            "preview": entry.content[:120],
+        }
+
+    def add_library_file(self, file_path: str, tags: list[str] | None = None) -> dict[str, str] | None:
+        entry = self.library.add_file(file_path, tags)
+        if entry is None:
+            return None
+        return {
+            "id": entry.id,
+            "title": entry.title,
+            "kind": entry.kind,
+            "source": entry.source,
+            "preview": entry.content[:120],
+        }
+
+    def remove_library_entry(self, entry_id: str) -> bool:
+        return self.library.remove_entry(entry_id)
+
+    def sync_cloud_library(self) -> str:
+        workspace = self.user_settings.data
+        if not bool(workspace.cloud_enabled):
+            return "Cloud sync is disabled in settings."
+        root_path = workspace.cloud_root_path.strip()
+        if not root_path:
+            return "Cloud folder path is empty."
+        added = self.library.sync_folder(root_path)
+        if added <= 0:
+            return "Cloud sync finished. No new library items were added."
+        return f"Cloud sync finished. Added or refreshed {added} library items."
 
     def list_projects(self) -> list[dict[str, str]]:
         return self.projects.list_projects()
@@ -822,6 +887,7 @@ class LunaEngine:
         result = self.xeno.project_builder.build_from_request(user_input)
         blueprint_text = self.xeno.handle(user_input)
         tasks = [{"title": step.title, "status": step.status, "description": step.description} for step in (result.agent_run.steps if result.agent_run else [])]
+        handoff_summary = result.agent_run.handoff_summary if result.agent_run is not None else ""
         resolved_name = project_name.strip() or result.blueprint.project_name
         current = self.projects.get_current_project()
         if current is None:
@@ -839,6 +905,8 @@ class LunaEngine:
         )
         self.projects.add_memory_entry(record.id, f"Xeno refreshed the project plan for {resolved_name}.")
         self.projects.add_memory_entry(record.id, f"Agent next step: {result.next_step}")
+        if handoff_summary:
+            self.projects.add_memory_entry(record.id, f"Agent handoff: {handoff_summary}")
         project_id = updated.id if updated is not None else record.id
         return {
             "project_id": project_id,
@@ -848,7 +916,7 @@ class LunaEngine:
             "next_step": result.next_step,
             "current_phase": result.agent_run.current_phase if result.agent_run else "planning",
             "tasks": tasks,
-            "xeno_note": f"Xeno prepared a new execution track for {resolved_name}.",
+            "xeno_note": f"Xeno prepared a new execution track for {resolved_name}. {handoff_summary}",
         }
 
     def generate_project_blueprint(self, user_input: str) -> str:
@@ -873,6 +941,14 @@ class LunaEngine:
             print(response)
             if user_input.lower() == "exit":
                 break
+
+
+
+
+
+
+
+
 
 
 

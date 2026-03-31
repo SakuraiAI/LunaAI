@@ -1,0 +1,47 @@
+{
+  "current_project_id": "c79d11dcb6c9",
+  "projects": [
+    {
+      "id": "c79d11dcb6c9",
+      "name": "Vytvor Python Projekt",
+      "brief": "vytvor python projekt pro lokalni task manager s agenty",
+      "blueprint_text": "Xeno prepared a high difficulty blueprint for 'Vytvor Python Projekt' as a automation project, with 5 structured tasks, 4 milestones, and a stronger execution track for the agent layer.\n\nXeno classified this as a automation request, tightened the plan around a high difficulty execution path, and prepared an agent handoff. Agent handoff ready: Lock the first milestone. Immediate action: Agent can immediately prepare a clean scope document for review. Queued after that: Map the execution path | Prepare local workspace | Build the first working slice\n\nProject: Vytvor Python Projekt\nGoal: vytvor python projekt pro lokalni task manager s agenty\nType: automation\nDifficulty: high\nStack: Python, Task Agents, Desktop Actions, Execution Log\nFolders: config/, app/core/, app/memory/, app/models/, app/tools/, app/workflow/, app/ui/, app/xeno/, data/chats/, data/projects/\nCore files: main.py, config/settings.py, app/core/engine.py, app/ui/desktop_app.py, app/xeno/project_builder.py, app/xeno/task_agent.py\nRequirements: clear_goal (high), modular_architecture (high), execution_path (high), agent_ready_tasks (high), safety_and_review (high)\nTasks: Clarify the real target [reasoning] | Choose the implementation stack [planning] | Create the workspace structure [builder] | Build the first working slice [execution] | Review and harden the system [review]\nMilestones: Define the smallest useful version. | Prepare a stable workspace and starter files. | Ship one usable end-to-end milestone. | Tighten quality, automation, and memory.\nRisks: Project scope may grow faster than the first version can support. | Execution needs to stay aligned with local tools, permissions, and reliability.\nExecution notes: Prefer a shippable first milestone over a broad feature list. | Let Luna talk to the user while Xeno keeps the plan structured underneath. | Use agents for concrete execution, not for vague explanation.\n\nAgent: Vytvor Python Projekt Agent\nObjective: vytvor python projekt pro lokalni task manager s agenty\nCurrent phase: execution_design\nExecution mode: guided\nRecommended next action: Prepare the workspace and ship the smallest working milestone.\nHandoff: Agent handoff ready: Lock the first milestone. Immediate action: Agent can immediately prepare a clean scope document for review. Queued after that: Map the execution path | Prepare local workspace | Build the first working slice\nSteps:\n1. [Completed] Lock the first milestone\n   Confirm what the first useful version must really deliver and cut anything non-essential.\n   Tool: reasoning | Risk: medium\n   Output: Initial scope captured from the request.\n   Agent handoff: Agent can immediately prepare a clean scope document for review.\n2. [In Progress] Map the execution path\n   Turn the project into milestones, dependencies, and a realistic next action.\n   Tool: planning | Risk: low\n   Output: Execution track prepared for the first working slice.\n   Agent handoff: Agent can generate a next-step file and lock the practical run order.\n3. [Pending] Prepare local workspace\n   Create the folders, starter files, and environment structure needed for execution.\n   Tool: builder | Risk: low\n   Depends on: Lock the first milestone, Map the execution path\n   Agent handoff: Agent can scaffold the local workspace right now.\n4. [Pending] Build the first working slice\n   Create one end-to-end result that proves the system works in practice.\n   Tool: execution | Risk: medium\n   Depends on: Prepare local workspace\n   Agent handoff: Agent can open the right workspace and hand the next implementation move to Luna.\n5. [Pending] Review quality and next step\n   Summarize what was built, what still blocks progress, and what should happen next.\n   Tool: review | Risk: low\n   Depends on: Build the first working slice\n   Agent handoff: Agent can refresh the review notes and prepare the next pass.\n\nNext step: Prepare the workspace and ship the smallest working milestone.",
+      "next_step": "Prepare the workspace and ship the smallest working milestone.",
+      "current_phase": "execution_design",
+      "tasks": [
+        {
+          "title": "Lock the first milestone",
+          "status": "completed",
+          "description": "Confirm what the first useful version must really deliver and cut anything non-essential."
+        },
+        {
+          "title": "Map the execution path",
+          "status": "in_progress",
+          "description": "Turn the project into milestones, dependencies, and a realistic next action."
+        },
+        {
+          "title": "Prepare local workspace",
+          "status": "pending",
+          "description": "Create the folders, starter files, and environment structure needed for execution."
+        },
+        {
+          "title": "Build the first working slice",
+          "status": "pending",
+          "description": "Create one end-to-end result that proves the system works in practice."
+        },
+        {
+          "title": "Review quality and next step",
+          "status": "pending",
+          "description": "Summarize what was built, what still blocks progress, and what should happen next."
+        }
+      ],
+      "memory_entries": [
+        "Agent handoff: Agent handoff ready: Lock the first milestone. Immediate action: Agent can immediately prepare a clean scope document for review. Queued after that: Map the execution path | Prepare local workspace | Build the first working slice",
+        "Agent next step: Prepare the workspace and ship the smallest working milestone.",
+        "Xeno refreshed the project plan for Vytvor Python Projekt."
+      ],
+      "decisions": [],
+      "attachment_names": []
+    }
+  ]
+}

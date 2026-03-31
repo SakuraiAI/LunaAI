@@ -415,6 +415,22 @@
       {
         "role": "assistant",
         "content": "Luna: Opened Blender."
+      },
+      {
+        "role": "user",
+        "content": "otevrit prosim blender"
+      },
+      {
+        "role": "assistant",
+        "content": "Luna: Mam akci pripravenou. Napis `potvrd akci`, pokud ji mam opravdu provest, nebo `zrus akci`, pokud ji mam zahodit."
+      },
+      {
+        "role": "user",
+        "content": "potvrd akci"
+      },
+      {
+        "role": "assistant",
+        "content": "Luna: Opened Blender."
       }
     ]
   }

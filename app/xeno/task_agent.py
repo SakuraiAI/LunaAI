@@ -11,6 +11,9 @@ class TaskAgent:
                 tool="reasoning",
                 output="Initial scope captured from the request.",
                 risk="medium",
+                action_ready=True,
+                action_hint="create_scope_file",
+                handoff_note="Agent can immediately prepare a clean scope document for review.",
             ),
             AgentStep(
                 title="Map the execution path",
@@ -19,12 +22,18 @@ class TaskAgent:
                 tool="planning",
                 output="Execution track prepared for the first working slice.",
                 risk="low",
+                action_ready=True,
+                action_hint="create_execution_plan",
+                handoff_note="Agent can generate a next-step file and lock the practical run order.",
             ),
             AgentStep(
                 title="Prepare local workspace",
                 description="Create the folders, starter files, and environment structure needed for execution.",
                 tool="builder",
                 dependencies=["Lock the first milestone", "Map the execution path"],
+                action_ready=True,
+                action_hint="create_project_scaffold",
+                handoff_note="Agent can scaffold the local workspace right now.",
             ),
             AgentStep(
                 title="Build the first working slice",
@@ -32,15 +41,22 @@ class TaskAgent:
                 tool="execution",
                 risk="medium",
                 dependencies=["Prepare local workspace"],
+                action_ready=True,
+                action_hint="open_workspace_in_tool",
+                handoff_note="Agent can open the right workspace and hand the next implementation move to Luna.",
             ),
             AgentStep(
                 title="Review quality and next step",
                 description="Summarize what was built, what still blocks progress, and what should happen next.",
                 tool="review",
                 dependencies=["Build the first working slice"],
+                action_ready=True,
+                action_hint="refresh_review_notes",
+                handoff_note="Agent can refresh the review notes and prepare the next pass.",
             ),
         ]
 
+        handoff_summary = self.create_handoff_summary_from_steps(steps)
         return AgentRun(
             name=f"{blueprint.project_name} Agent",
             objective=blueprint.goal,
@@ -48,7 +64,26 @@ class TaskAgent:
             steps=steps,
             execution_mode="guided" if blueprint.difficulty == "high" else "accelerated",
             recommended_next_action="Prepare the workspace and ship the smallest working milestone.",
+            handoff_summary=handoff_summary,
         )
+
+    def create_handoff_summary_from_steps(self, steps: list[AgentStep]) -> str:
+        ready_steps = [step for step in steps if step.action_ready]
+        if not ready_steps:
+            return "Xeno has no action-ready handoff for the agent yet."
+        lead = ready_steps[0]
+        lines = [
+            f"Agent handoff ready: {lead.title}.",
+            f"Immediate action: {lead.handoff_note or lead.description}",
+        ]
+        if len(ready_steps) > 1:
+            lines.append("Queued after that: " + " | ".join(step.title for step in ready_steps[1:4]))
+        return " ".join(lines)
+
+    def create_handoff_summary(self, run: AgentRun) -> str:
+        if run.handoff_summary:
+            return run.handoff_summary
+        return self.create_handoff_summary_from_steps(run.steps)
 
     def can_handle(self, user_input: str) -> bool:
         normalized = user_input.strip().lower()
@@ -138,6 +173,7 @@ class TaskAgent:
             f"Current phase: {run.current_phase}",
             f"Execution mode: {run.execution_mode}",
             f"Recommended next action: {run.recommended_next_action}",
+            f"Handoff: {self.create_handoff_summary(run)}",
             "Steps:",
         ]
 
@@ -150,6 +186,7 @@ class TaskAgent:
                 lines.append(f"   Depends on: {', '.join(step.dependencies)}")
             if step.output:
                 lines.append(f"   Output: {step.output}")
+            if step.action_ready:
+                lines.append(f"   Agent handoff: {step.handoff_note or step.action_hint}")
 
         return "\n".join(lines)
-

@@ -42,6 +42,8 @@ class XenoCoordinator:
             )
             if result.blueprint.risks:
                 parts.append("Hidden Xeno risk notes: " + " | ".join(result.blueprint.risks[:2]))
+            if result.agent_run is not None:
+                parts.append("Hidden Xeno handoff: " + self.task_agent.create_handoff_summary(result.agent_run))
 
         if self.task_agent.can_handle(user_input):
             parts.append(self.task_agent.create_action_support(user_input))
