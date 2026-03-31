@@ -1,4 +1,4 @@
-from app.xeno.models import BuilderResult, ProjectBlueprint
+﻿from app.xeno.models import BuilderResult, ProjectBlueprint
 from app.xeno.planner import XenoPlanner
 from app.xeno.task_agent import TaskAgent
 
@@ -12,23 +12,33 @@ class ProjectBuilder:
         self.planner = planner or XenoPlanner()
         self.task_agent = task_agent or TaskAgent()
 
-    def build_from_request(self, user_input: str) -> BuilderResult:
+    def build_from_request(self, user_input: str, intelligence_level: str = "4") -> BuilderResult:
         project_name = self._guess_project_name(user_input)
         goal = self._guess_goal(user_input)
-        blueprint = self.planner.create_blueprint(project_name=project_name, goal=goal)
-        agent_run = self.task_agent.create_run(blueprint)
+        blueprint = self.planner.create_blueprint(
+            project_name=project_name,
+            goal=goal,
+            intelligence_level=intelligence_level,
+        )
+        agent_run = self.task_agent.create_run(blueprint, intelligence_level=intelligence_level)
         handoff_summary = self.task_agent.create_handoff_summary(agent_run)
+        level = str(intelligence_level).strip()
+        depth_note = {
+            "3": "lighter, faster planning",
+            "4": "balanced planning depth",
+            "5": "deeper strategic planning",
+        }.get(level, "balanced planning depth")
         summary = (
             f"Xeno prepared a {blueprint.difficulty} difficulty blueprint for '{blueprint.project_name}' "
             f"as a {blueprint.project_type} project, with {len(blueprint.tasks)} structured tasks, "
-            f"{len(blueprint.milestones)} milestones, and a stronger execution track for the agent layer."
+            f"{len(blueprint.milestones)} milestones, and {depth_note} for the agent layer."
         )
         next_step = agent_run.recommended_next_action or (
             "Confirm the first milestone and let the task agent prepare the local workspace."
         )
         xeno_note = (
             f"Xeno classified this as a {blueprint.project_type} request, tightened the plan around a {blueprint.difficulty} difficulty execution path, "
-            f"and prepared an agent handoff. {handoff_summary}"
+            f"and prepared an agent handoff at level {level}. {handoff_summary}"
         )
         return BuilderResult(
             summary=summary,

@@ -33,8 +33,9 @@ class PromptBuilder:
         hidden_support: str = "",
         project_context: str = "",
         library_context: str = "",
+        intelligence_level: str = "4",
     ) -> list[dict[str, str]]:
-        history = self._history_for_prompt()
+        history = self._history_for_prompt(intelligence_level)
         learning_memory = self.long_memory.summary()
 
         system_content = (
@@ -42,11 +43,13 @@ class PromptBuilder:
             f"Workflow mode: {mode}\n"
             f"Selected response style: {selected_mode}\n"
             f"Reasoning box: {reasoning_box}\n"
+            f"System intelligence level: {intelligence_level}\n"
             f"Internet enabled: {self.internet.is_enabled()}\n"
             f"Internet mode: {self.internet.mode()}\n"
             f"{self._time_context()}\n"
             f"{self._reasoning_box_instruction(reasoning_box)}\n"
-            f"{self._response_policy(selected_mode, reasoning_box)}"
+            f"{self._intelligence_instruction(intelligence_level)}\n"
+            f"{self._response_policy(selected_mode, reasoning_box, intelligence_level)}"
         )
         if instruction:
             system_content += f"\nInstruction: {instruction}"
@@ -86,10 +89,19 @@ class PromptBuilder:
         messages.append({"role": "user", "content": user_input})
         return messages
 
-    def _history_for_prompt(self) -> list[dict[str, str]]:
+    def _history_for_prompt(self, intelligence_level: str = "4") -> list[dict[str, str]]:
         history = self.memory.load_history()
         filtered_history: list[dict[str, str]] = []
         total_chars = 0
+        level = str(intelligence_level).strip()
+        char_budget = 3600
+        max_messages = 6
+        if level == "5":
+            char_budget = 5200
+            max_messages = 8
+        elif level == "3":
+            char_budget = 2600
+            max_messages = 5
         blocked_fragments = [
             "lm studio returned http",
             "lm studio is not reachable",
@@ -127,11 +139,11 @@ class PromptBuilder:
             if len(trimmed) > 900:
                 trimmed = trimmed[:900].rstrip() + "..."
             total_chars += len(trimmed)
-            if total_chars > 3600:
+            if total_chars > char_budget:
                 continue
 
             filtered_history.append({"role": msg.get("role", "user"), "content": trimmed})
-            if len(filtered_history) >= 6:
+            if len(filtered_history) >= max_messages:
                 break
 
         filtered_history.reverse()
@@ -160,12 +172,40 @@ class PromptBuilder:
             "Lead with the result, then include only the minimum explanation needed."
         )
 
-    def _response_policy(self, selected_mode: str, reasoning_box: str) -> str:
+    def _intelligence_instruction(self, intelligence_level: str) -> str:
+        level = str(intelligence_level).strip()
+        if level == "5":
+            return (
+                "Intelligence level: 5. "
+                "Think more strategically, notice tradeoffs, structure longer horizons, and treat the request like part of a larger system. "
+                "Prefer strong planning, cleaner decomposition, deeper next-step judgment, and stronger internal use of Xeno when the task is complex."
+            )
+        if level == "3":
+            return (
+                "Intelligence level: 3. "
+                "Stay practical, lighter, and faster. "
+                "Prefer direct answers and simple next actions over deep decomposition."
+            )
+        return (
+            "Intelligence level: 4. "
+            "Balance speed and depth. "
+            "Use solid planning and judgment, but stay concise and grounded."
+        )
+
+    def _response_policy(self, selected_mode: str, reasoning_box: str, intelligence_level: str) -> str:
         if reasoning_box == "white_box":
             return (
                 "Response policy: Give a stable, structured answer. "
                 "Start with the direct answer, then use short sections or numbered steps. "
                 "Do not ramble, do not roleplay, and do not add filler questions at the end."
+            )
+
+        if intelligence_level == "5":
+            return (
+                "Response policy: Be concise, but stronger in synthesis. "
+                "Prefer clear recommendations, tradeoffs, and the best next move. "
+                "Do not add unnecessary follow-up questions. "
+                "If a link is requested, only give a verified-looking direct link and never invent example URLs."
             )
 
         if selected_mode == "collaboration":

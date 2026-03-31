@@ -2,6 +2,8 @@
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from app.core.text_utils import dedupe_preserve_order, repair_text
+
 
 @dataclass(slots=True)
 class LongMemory:
@@ -39,8 +41,8 @@ class LongMemory:
             for key in self.knowledge:
                 values = knowledge.get(key, [])
                 if isinstance(values, list):
-                    cleaned = [value for value in values if isinstance(value, str) and value.strip()]
-                    self.knowledge[key] = cleaned[-12:]
+                    cleaned = [repair_text(value) for value in values if isinstance(value, str) and value.strip()]
+                    self.knowledge[key] = dedupe_preserve_order(cleaned[-24:], normalizer=lambda item: " ".join(item.lower().split()), limit=12)
 
         reviewed_messages = payload.get("reviewed_messages", 0)
         if isinstance(reviewed_messages, int) and reviewed_messages >= 0:
@@ -60,7 +62,7 @@ class LongMemory:
         )
 
     def add(self, category: str, value: str) -> None:
-        normalized = value.strip()
+        normalized = repair_text(value).strip()
         if not normalized or category not in self.knowledge:
             return
 
@@ -73,7 +75,7 @@ class LongMemory:
         self._persist()
 
     def remember_from_user_input(self, user_input: str) -> None:
-        text = user_input.strip()
+        text = repair_text(user_input).strip()
         lowered = text.lower()
         if not text:
             return

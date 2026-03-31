@@ -3,9 +3,24 @@ from __future__ import annotations
 import os
 import re
 import subprocess
+from dataclasses import asdict, dataclass
 from pathlib import Path
 
 from app.core.user_settings import UserWorkspaceSettings
+
+
+@dataclass(slots=True)
+class ActionResult:
+    ok: bool
+    status: str
+    message: str
+    detail: str = ""
+    category: str = "system"
+    action_key: str = ""
+    workspace: str = ""
+
+    def to_dict(self) -> dict[str, str | bool]:
+        return asdict(self)
 
 
 class DesktopActionTool:
@@ -37,9 +52,47 @@ class DesktopActionTool:
         "substance": "Substance 3D Painter",
     }
 
+    ACTION_HINT_REGISTRY = {
+        "create_scope_file": {"category": "file_change", "label": "Create scope file"},
+        "create_execution_plan": {"category": "file_change", "label": "Create execution plan"},
+        "create_project_scaffold": {"category": "file_change", "label": "Create project scaffold"},
+        "open_workspace_in_tool": {"category": "app_launch", "label": "Open workspace in tool"},
+        "refresh_review_notes": {"category": "file_change", "label": "Refresh review notes"},
+    }
+
     def __init__(self, workspace_root: Path | None = None) -> None:
         self.workspace_root = workspace_root or Path("data/projects/workspaces")
         self.workspace_root.mkdir(parents=True, exist_ok=True)
+
+    def _result(
+        self,
+        *,
+        ok: bool,
+        status: str,
+        message: str,
+        detail: str = "",
+        category: str = "system",
+        action_key: str = "",
+        workspace: str = "",
+    ) -> dict[str, str | bool]:
+        return ActionResult(
+            ok=ok,
+            status=status,
+            message=message.strip(),
+            detail=detail.strip(),
+            category=category,
+            action_key=action_key,
+            workspace=workspace,
+        ).to_dict()
+
+    def list_registered_actions(self) -> list[dict[str, str]]:
+        return [
+            {"action_key": key, "category": value["category"], "label": value["label"]}
+            for key, value in self.ACTION_HINT_REGISTRY.items()
+        ]
+
+    def describe_action_hint(self, action_hint: str) -> dict[str, str]:
+        return dict(self.ACTION_HINT_REGISTRY.get(action_hint, {"category": "system", "label": action_hint or "Manual action"}))
 
     def _slugify(self, value: str) -> str:
         normalized = value.strip().lower()
@@ -156,7 +209,12 @@ class DesktopActionTool:
         self.create_folder(workspace / "tests")
         self.create_files_batch(
             {
-                workspace / "main.py": "def main() -> None:\n    print(\"Hello from LunaAI\")\n\n\nif __name__ == \"__main__\":\n    main()\n",
+                workspace / "main.py": (
+                    'def main() -> None:\n'
+                    '    print("Hello from LunaAI")\n\n\n'
+                    'if __name__ == "__main__":\n'
+                    '    main()\n'
+                ),
                 workspace / "requirements.txt": "",
                 workspace / "README.md": f"# {project_name}\n\nPython project scaffold created by Luna.\n",
                 workspace / "src" / "__init__.py": "",
@@ -170,8 +228,35 @@ class DesktopActionTool:
         self.create_folder(workspace / "assets")
         self.create_files_batch(
             {
-                workspace / "index.html": "<!doctype html>\n<html lang=\"en\">\n<head>\n  <meta charset=\"UTF-8\">\n  <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">\n  <title>Luna Web Project</title>\n  <link rel=\"stylesheet\" href=\"styles.css\">\n</head>\n<body>\n  <main>\n    <h1>Hello from LunaAI</h1>\n    <p>Your web project is ready.</p>\n  </main>\n  <script src=\"script.js\"></script>\n</body>\n</html>\n",
-                workspace / "styles.css": "body {\n  font-family: Arial, sans-serif;\n  background: #111;\n  color: #f5f5f5;\n  margin: 0;\n  min-height: 100vh;\n  display: grid;\n  place-items: center;\n}\n",
+                workspace / "index.html": (
+                    "<!doctype html>\n"
+                    '<html lang="en">\n'
+                    "<head>\n"
+                    '  <meta charset="UTF-8">\n'
+                    '  <meta name="viewport" content="width=device-width, initial-scale=1.0">\n'
+                    "  <title>Luna Web Project</title>\n"
+                    '  <link rel="stylesheet" href="styles.css">\n'
+                    "</head>\n"
+                    "<body>\n"
+                    "  <main>\n"
+                    "    <h1>Hello from LunaAI</h1>\n"
+                    "    <p>Your web project is ready.</p>\n"
+                    "  </main>\n"
+                    '  <script src="script.js"></script>\n'
+                    "</body>\n"
+                    "</html>\n"
+                ),
+                workspace / "styles.css": (
+                    "body {\n"
+                    "  font-family: Arial, sans-serif;\n"
+                    "  background: #111;\n"
+                    "  color: #f5f5f5;\n"
+                    "  margin: 0;\n"
+                    "  min-height: 100vh;\n"
+                    "  display: grid;\n"
+                    "  place-items: center;\n"
+                    "}\n"
+                ),
                 workspace / "script.js": "console.log('Luna web project ready');\n",
                 workspace / "README.md": f"# {project_name}\n\nWeb project scaffold created by Luna.\n",
             }
@@ -184,7 +269,15 @@ class DesktopActionTool:
         self.create_folder(workspace / "app" / "ui")
         self.create_files_batch(
             {
-                workspace / "main.py": "import sys\nfrom PySide6.QtWidgets import QApplication, QLabel\n\napp = QApplication(sys.argv)\nlabel = QLabel('Hello from LunaAI')\nlabel.resize(360, 120)\nlabel.show()\nsys.exit(app.exec())\n",
+                workspace / "main.py": (
+                    "import sys\n"
+                    "from PySide6.QtWidgets import QApplication, QLabel\n\n"
+                    "app = QApplication(sys.argv)\n"
+                    "label = QLabel('Hello from LunaAI')\n"
+                    "label.resize(360, 120)\n"
+                    "label.show()\n"
+                    "sys.exit(app.exec())\n"
+                ),
                 workspace / "requirements.txt": "PySide6\n",
                 workspace / "README.md": f"# {project_name}\n\nPySide6 project scaffold created by Luna.\n",
                 workspace / "app" / "__init__.py": "",
@@ -197,6 +290,13 @@ class DesktopActionTool:
         resolved = Path(path).expanduser()
         os.startfile(str(resolved))
         return f"Opened {resolved}"
+
+    def _optional_open_detail(self, path: Path) -> str:
+        try:
+            opened_message = self.open_path(path)
+            return opened_message
+        except OSError as error:
+            return f"Created successfully, but opening failed: {error}"
 
     def open_in_vscode(self, vscode_path: str, target: Path) -> str:
         if not vscode_path.strip():
@@ -217,41 +317,98 @@ class DesktopActionTool:
         project_name: str = "",
     ) -> dict[str, str | bool]:
         app_path = self._app_path_for(app_key, workspace_settings)
+        app_name = self.APP_DISPLAY_NAMES.get(app_key, app_key)
+        action_key = f"launch_{app_key}"
         if not app_path:
-            return {"ok": False, "message": "No app path is configured yet."}
+            return self._result(
+                ok=False,
+                status="failed",
+                message=f"{app_name} nema nastavenou cestu.",
+                detail="No app path is configured yet.",
+                category="app_launch",
+                action_key=action_key,
+            )
 
         target_path = Path(app_path)
         if not target_path.exists():
-            return {"ok": False, "message": f"Configured app path was not found: {app_path}"}
+            return self._result(
+                ok=False,
+                status="failed",
+                message=f"Cesta k aplikaci {app_name} nebyla nalezena.",
+                detail=f"Configured app path was not found: {app_path}",
+                category="app_launch",
+                action_key=action_key,
+            )
 
         workspace = self.ensure_project_workspace(project_name) if project_name else None
-        app_name = self.APP_DISPLAY_NAMES.get(app_key, app_key)
 
         try:
             if app_key == "vscode":
                 if workspace is not None:
                     subprocess.Popen([str(target_path), str(workspace)])
-                    return {"ok": True, "message": f"Opened {workspace} in VS Code."}
+                    return self._result(
+                        ok=True,
+                        status="completed",
+                        message=f"Opened {workspace} in VS Code.",
+                        detail=f"VS Code launched with workspace {workspace}",
+                        category="app_launch",
+                        action_key=action_key,
+                        workspace=str(workspace),
+                    )
                 subprocess.Popen([str(target_path)])
-                return {"ok": True, "message": "Opened VS Code."}
+                return self._result(
+                    ok=True,
+                    status="completed",
+                    message="Opened VS Code.",
+                    detail="VS Code launched.",
+                    category="app_launch",
+                    action_key=action_key,
+                )
 
             if target_path.is_dir():
                 self.open_path(target_path)
-                return {"ok": True, "message": f"Opened {app_name}."}
+                return self._result(
+                    ok=True,
+                    status="completed",
+                    message=f"Opened {app_name}.",
+                    detail=f"Opened directory target for {app_name}.",
+                    category="app_launch",
+                    action_key=action_key,
+                )
 
             if target_path.suffix.lower() in {".lnk", ".url", ".exe"}:
                 os.startfile(str(target_path))
             else:
                 subprocess.Popen([str(target_path)])
         except OSError as error:
-            return {"ok": False, "message": f"Could not launch the app: {error}"}
+            return self._result(
+                ok=False,
+                status="failed",
+                message=f"{app_name} se nepodarilo otevrit.",
+                detail=f"Could not launch the app: {error}",
+                category="app_launch",
+                action_key=action_key,
+                workspace=str(workspace or ""),
+            )
 
         if workspace is not None:
-            return {
-                "ok": True,
-                "message": f"Opened {app_name}. Project workspace is ready at {workspace}.",
-            }
-        return {"ok": True, "message": f"Opened {app_name}."}
+            return self._result(
+                ok=True,
+                status="completed",
+                message=f"Opened {app_name}. Project workspace is ready at {workspace}.",
+                detail=f"{app_name} launched and workspace is ready.",
+                category="app_launch",
+                action_key=action_key,
+                workspace=str(workspace),
+            )
+        return self._result(
+            ok=True,
+            status="completed",
+            message=f"Opened {app_name}.",
+            detail=f"{app_name} launched.",
+            category="app_launch",
+            action_key=action_key,
+        )
 
     def run_task_action(
         self,
@@ -259,58 +416,44 @@ class DesktopActionTool:
         project_name: str,
         brief: str,
         next_step: str,
-        task_title: str,
+        task: dict[str, object],
         workspace_settings: UserWorkspaceSettings,
-    ) -> dict[str, str]:
+    ) -> dict[str, str | bool]:
+        task_title = str(task.get("title", "Task"))
         normalized = task_title.strip().lower()
+        action_hint = str(task.get("action_hint", "")).strip().lower()
+        handoff_note = str(task.get("handoff_note", "")).strip()
         workspace = self.ensure_project_workspace(project_name)
+        action_meta = self.describe_action_hint(action_hint)
+        category = action_meta.get("category", "system")
 
-        if any(token in normalized for token in ["scope", "clarify the real target", "lock the first milestone"]):
+        if action_hint == "create_scope_file" or any(token in normalized for token in ["scope", "clarify the real target", "lock the first milestone"]):
             created = self.create_scope_file(project_name, brief)
-            self.open_path(created)
-            return {
-                "status": "completed",
-                "message": f"Task agent prepared the project scope at {created} and opened it for review.",
-                "workspace": str(workspace),
-            }
+            open_detail = self._optional_open_detail(created)
+            message = handoff_note or f"Task agent prepared the project scope at {created}."
+            return self._result(ok=True, status="completed", message=message, detail=f"Scope file prepared: {created}. {open_detail}", category=category, action_key=action_hint or "create_scope_file", workspace=str(workspace))
 
-        if any(token in normalized for token in ["execution path", "map the execution path", "implementation stack"]):
+        if action_hint == "create_execution_plan" or any(token in normalized for token in ["execution path", "map the execution path", "implementation stack"]):
             created = self.create_execution_plan_file(project_name, next_step)
-            self.open_path(created)
-            return {
-                "status": "completed",
-                "message": f"Task agent created an execution plan at {created} and opened it.",
-                "workspace": str(workspace),
-            }
+            open_detail = self._optional_open_detail(created)
+            message = handoff_note or f"Task agent created the execution plan at {created}."
+            return self._result(ok=True, status="completed", message=message, detail=f"Execution plan updated: {created}. {open_detail}", category=category, action_key=action_hint or "create_execution_plan", workspace=str(workspace))
 
-        if any(token in normalized for token in ["workspace", "implementation structure", "scaffold", "prepare local workspace"]):
+        if action_hint == "create_project_scaffold" or any(token in normalized for token in ["workspace", "implementation structure", "scaffold", "prepare local workspace"]):
             created_workspace = self.create_project_scaffold(project_name, brief)
-            return {
-                "status": "completed",
-                "message": f"Task agent created the project workspace structure in {created_workspace}.",
-                "workspace": str(created_workspace),
-            }
+            message = handoff_note or f"Task agent created the project workspace structure in {created_workspace}."
+            return self._result(ok=True, status="completed", message=message, detail=f"Workspace scaffold ready: {created_workspace}", category=category, action_key=action_hint or "create_project_scaffold", workspace=str(created_workspace))
 
-        if any(token in normalized for token in ["working slice", "milestone", "build the first working slice"]):
+        if action_hint == "open_workspace_in_tool" or any(token in normalized for token in ["working slice", "milestone", "build the first working slice"]):
             created_workspace = self.create_project_scaffold(project_name, brief)
-            message = self.open_in_vscode(workspace_settings.vscode_path, created_workspace)
-            return {
-                "status": "in_progress",
-                "message": f"Task agent prepared the workspace and {message.lower()}.",
-                "workspace": str(created_workspace),
-            }
+            vscode_message = self.open_in_vscode(workspace_settings.vscode_path, created_workspace)
+            message = handoff_note or f"Task agent prepared the workspace and {vscode_message.lower()}."
+            return self._result(ok=True, status="in_progress", message=message, detail=f"Workspace opened for implementation: {created_workspace}", category=category, action_key=action_hint or "open_workspace_in_tool", workspace=str(created_workspace))
 
-        if any(token in normalized for token in ["review quality", "review and harden", "next step"]):
+        if action_hint == "refresh_review_notes" or any(token in normalized for token in ["review quality", "review and harden", "next step"]):
             created = self.create_execution_plan_file(project_name, next_step)
-            return {
-                "status": "completed",
-                "message": f"Task agent refreshed the review notes and next-step file at {created}.",
-                "workspace": str(workspace),
-            }
+            message = handoff_note or f"Task agent refreshed the review notes and next-step file at {created}."
+            return self._result(ok=True, status="completed", message=message, detail=f"Review notes refreshed: {created}", category=category, action_key=action_hint or "refresh_review_notes", workspace=str(workspace))
 
-        self.open_path(workspace)
-        return {
-            "status": "in_progress",
-            "message": f"Task agent opened the project workspace at {workspace} for the next manual step.",
-            "workspace": str(workspace),
-        }
+        open_detail = self._optional_open_detail(workspace)
+        return self._result(ok=True, status="in_progress", message=handoff_note or f"Task agent prepared the project workspace at {workspace} for the next manual step.", detail=f"Workspace ready: {workspace}. {open_detail}", category="path_open", action_key=action_hint or "open_workspace", workspace=str(workspace))

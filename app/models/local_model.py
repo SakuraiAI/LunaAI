@@ -1,11 +1,11 @@
 import ast
 import json
-import re
 from http.client import RemoteDisconnected
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 from app.models.base_model import BaseModel
+from app.core.text_utils import clean_model_response_text
 
 
 class LocalModel(BaseModel):
@@ -60,27 +60,7 @@ class LocalModel(BaseModel):
         if cleaned.startswith("Assistant: "):
             cleaned = cleaned.removeprefix("Assistant: ").strip()
 
-        cleaned = cleaned.replace("\r\n", "\n").strip()
-
-        lines: list[str] = []
-        seen_urls: set[str] = set()
-        url_pattern = re.compile(r"https?://\S+")
-        for raw_line in cleaned.split("\n"):
-            line = raw_line.strip()
-            if not line:
-                if lines and lines[-1] != "":
-                    lines.append("")
-                continue
-            urls = url_pattern.findall(line)
-            if urls and all(url in seen_urls for url in urls) and len(line) <= 240:
-                continue
-            for url in urls:
-                seen_urls.add(url)
-            if not lines or lines[-1] != line:
-                lines.append(line)
-
-        cleaned = "\n".join(lines).strip()
-        return cleaned
+        return clean_model_response_text(cleaned)
 
     def generate(self, prompt: str | list[dict[str, str]]) -> str:
         system_prompt = "You are Luna."

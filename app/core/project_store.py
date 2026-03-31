@@ -1,7 +1,9 @@
-from dataclasses import asdict, dataclass, field
+﻿from dataclasses import asdict, dataclass, field
 import json
 from pathlib import Path
 from uuid import uuid4
+
+from app.core.text_utils import dedupe_preserve_order, normalize_memory_entry, repair_text
 
 
 @dataclass(slots=True)
@@ -11,6 +13,7 @@ class ProjectRecord:
     brief: str
     blueprint_text: str = ""
     next_step: str = ""
+    handoff_summary: str = ""
     current_phase: str = "draft"
     tasks: list[dict[str, str]] = field(default_factory=list)
     memory_entries: list[str] = field(default_factory=list)
@@ -19,6 +22,15 @@ class ProjectRecord:
 
 
 class ProjectStore:
+    SINGLETON_MEMORY_PREFIXES = {
+        "agent handoff:",
+        "agent next step:",
+        "xeno model guidance:",
+        "xeno refreshed",
+        "chat focus:",
+        "luna direction:",
+    }
+
     def __init__(self, storage_path: Path) -> None:
         self.storage_path = storage_path
         self.storage_path.parent.mkdir(parents=True, exist_ok=True)
@@ -63,6 +75,7 @@ class ProjectStore:
                         brief=brief,
                         blueprint_text=item.get("blueprint_text", "") if isinstance(item.get("blueprint_text"), str) else "",
                         next_step=item.get("next_step", "") if isinstance(item.get("next_step"), str) else "",
+                        handoff_summary=item.get("handoff_summary", "") if isinstance(item.get("handoff_summary"), str) else "",
                         current_phase=item.get("current_phase", "draft") if isinstance(item.get("current_phase"), str) else "draft",
                         tasks=tasks,
                         memory_entries=memory_entries,
@@ -83,17 +96,23 @@ class ProjectStore:
             status = task.get("status", "pending")
             description = task.get("description", "")
             if isinstance(title, str) and isinstance(status, str) and isinstance(description, str):
-                tasks.append({
+                normalized = {
                     "title": title,
                     "status": status,
                     "description": description,
-                })
+                }
+                for optional_key in ["tool", "risk", "action_hint", "handoff_note", "dependencies"]:
+                    value = task.get(optional_key, "")
+                    if isinstance(value, str):
+                        normalized[optional_key] = value
+                tasks.append(normalized)
         return tasks
 
     def _normalize_string_list(self, raw_values: object) -> list[str]:
         if not isinstance(raw_values, list):
             return []
-        return [value.strip() for value in raw_values if isinstance(value, str) and value.strip()]
+        cleaned = [repair_text(value).strip() for value in raw_values if isinstance(value, str) and value.strip()]
+        return dedupe_preserve_order(cleaned, normalizer=lambda item: " ".join(item.lower().split()))
 
     def save(self) -> None:
         payload = {
@@ -136,6 +155,7 @@ class ProjectStore:
         brief: str | None = None,
         blueprint_text: str | None = None,
         next_step: str | None = None,
+        handoff_summary: str | None = None,
         current_phase: str | None = None,
         tasks: list[dict[str, str]] | None = None,
         memory_entries: list[str] | None = None,
@@ -154,6 +174,8 @@ class ProjectStore:
             project.blueprint_text = blueprint_text
         if next_step is not None:
             project.next_step = next_step
+        if handoff_summary is not None:
+            project.handoff_summary = handoff_summary
         if current_phase is not None:
             project.current_phase = current_phase
         if tasks is not None:
@@ -179,21 +201,36 @@ class ProjectStore:
         self.save()
         return project
 
+    def _memory_prefix(self, entry: str) -> str:
+        lowered = repair_text(entry).strip().lower()
+        for prefix in self.SINGLETON_MEMORY_PREFIXES:
+            if lowered.startswith(prefix):
+                return prefix
+        return ""
+
     def add_memory_entry(self, project_id: str, entry: str) -> ProjectRecord | None:
         project = self.get_project(project_id)
         if project is None:
             return None
-        clean_entry = entry.strip()
+        clean_entry = repair_text(entry).strip()
         if not clean_entry:
             return project
-        if project.memory_entries and project.memory_entries[0] == clean_entry:
-            return project
+        new_key = normalize_memory_entry(clean_entry)
+        new_prefix = self._memory_prefix(clean_entry)
+        filtered: list[str] = []
+        for item in project.memory_entries:
+            if normalize_memory_entry(item) == new_key:
+                continue
+            if new_prefix and self._memory_prefix(item) == new_prefix:
+                continue
+            filtered.append(item)
+        project.memory_entries = filtered
         project.memory_entries.insert(0, clean_entry)
-        project.memory_entries = project.memory_entries[:24]
-        self.save()
-        return project
-        project.memory_entries.insert(0, clean_entry)
-        project.memory_entries = project.memory_entries[:24]
+        project.memory_entries = dedupe_preserve_order(
+            project.memory_entries,
+            normalizer=normalize_memory_entry,
+            limit=32,
+        )
         self.save()
         return project
 
@@ -226,5 +263,3 @@ class ProjectStore:
         self.current_project_id = project.id
         self.save()
         return project
-
-

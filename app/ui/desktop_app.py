@@ -1,4 +1,4 @@
-import html
+﻿import html
 import os
 import platform
 import re
@@ -155,6 +155,121 @@ class ResponseWorker(QObject):
     def run(self) -> None:
         response = self.engine.chat(self.user_text)
         self.finished.emit(response)
+
+
+class VoiceInputWorker(QObject):
+    finished = Signal(str, str)
+
+    def __init__(self, timeout_seconds: int = 8) -> None:
+        super().__init__()
+        self.timeout_seconds = timeout_seconds
+
+    @Slot()
+    def run(self) -> None:
+        script = f"""
+$ProgressPreference = 'SilentlyContinue'
+try {{
+    Add-Type -AssemblyName System.Speech
+    $recognizers = [System.Speech.Recognition.SpeechRecognitionEngine]::InstalledRecognizers()
+    if (-not $recognizers -or $recognizers.Count -eq 0) {{
+        [Console]::Error.WriteLine('Windows speech recognition is not available on this PC.')
+        exit 1
+    }}
+    $chosen = $recognizers | Where-Object {{ $_.Culture.Name -eq 'cs-CZ' }} | Select-Object -First 1
+    if (-not $chosen) {{
+        $chosen = $recognizers | Where-Object {{ $_.Culture.Name -eq 'en-US' }} | Select-Object -First 1
+    }}
+    if (-not $chosen) {{
+        $chosen = $recognizers | Select-Object -First 1
+    }}
+    $engine = New-Object System.Speech.Recognition.SpeechRecognitionEngine($chosen)
+    $engine.LoadGrammar((New-Object System.Speech.Recognition.DictationGrammar))
+    $engine.SetInputToDefaultAudioDevice()
+    [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+    $result = $engine.Recognize([TimeSpan]::FromSeconds({self.timeout_seconds}))
+    if ($null -ne $result -and $result.Text) {{
+        Write-Output $result.Text
+    }}
+}} catch {{
+    [Console]::Error.WriteLine($_.Exception.Message)
+    exit 1
+}}
+""".strip()
+
+        try:
+            completed = subprocess.run(
+                ["powershell", "-NoProfile", "-Command", script],
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                timeout=self.timeout_seconds + 4,
+                check=False,
+            )
+        except (OSError, subprocess.SubprocessError) as exc:
+            self.finished.emit("", f"Voice input failed: {exc}")
+            return
+
+        transcript = (completed.stdout or "").strip()
+        error_text = (completed.stderr or "").strip()
+        if completed.returncode != 0:
+            self.finished.emit("", error_text or "Voice input could not start.")
+            return
+        if not transcript:
+            self.finished.emit("", "Nic jsem neslysela. Zkus to prosim jeste jednou.")
+            return
+        self.finished.emit(transcript, "")
+
+
+class VoiceOutputWorker(QObject):
+    finished = Signal(str)
+
+    def __init__(self, text: str) -> None:
+        super().__init__()
+        self.text = text
+
+    @Slot()
+    def run(self) -> None:
+        clean_text = re.sub(r"\s+", " ", self.text).strip()
+        if not clean_text:
+            self.finished.emit("")
+            return
+
+        safe_text = clean_text.replace("'", "''")
+        script = f"""
+$ProgressPreference = 'SilentlyContinue'
+try {{
+    Add-Type -AssemblyName System.Speech
+    $voice = New-Object System.Speech.Synthesis.SpeechSynthesizer
+    $czech = $voice.GetInstalledVoices() | Where-Object {{ $_.VoiceInfo.Culture.Name -eq 'cs-CZ' }} | Select-Object -First 1
+    if ($czech) {{
+        $voice.SelectVoice($czech.VoiceInfo.Name)
+    }}
+    $voice.Rate = 0
+    $voice.Speak('{safe_text}')
+}} catch {{
+    [Console]::Error.WriteLine($_.Exception.Message)
+    exit 1
+}}
+""".strip()
+
+        try:
+            completed = subprocess.run(
+                ["powershell", "-NoProfile", "-Command", script],
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                timeout=max(18, min(90, len(clean_text) // 8 + 12)),
+                check=False,
+            )
+        except (OSError, subprocess.SubprocessError) as exc:
+            self.finished.emit(f"Voice output failed: {exc}")
+            return
+
+        error_text = (completed.stderr or "").strip()
+        if completed.returncode != 0:
+            self.finished.emit(error_text or "Voice output could not start.")
+            return
+        self.finished.emit("")
 
 
 class MessageBubble(QFrame):
@@ -693,6 +808,14 @@ class LunaMainWindow(QMainWindow):
         self.engine = engine
         self.worker_thread: QThread | None = None
         self.worker: ResponseWorker | None = None
+        self.voice_thread: QThread | None = None
+        self.voice_worker: VoiceInputWorker | None = None
+        self.voice_output_thread: QThread | None = None
+        self.voice_output_worker: VoiceOutputWorker | None = None
+        self.voice_listening = False
+        self.voice_mode_enabled = False
+        self._auto_send_voice_input = False
+        self._speak_next_response = False
         self.pending_thinking: TypingBubble | None = None
         self.reveal_timer: QTimer | None = None
         self.reveal_bubble: MessageBubble | None = None
@@ -912,6 +1035,11 @@ class LunaMainWindow(QMainWindow):
         self._update_sidebar_toggle_icon()
         self.send_button.setIcon(style.standardIcon(QStyle.StandardPixmap.SP_ArrowForward))
         self.empty_send_button.setIcon(style.standardIcon(QStyle.StandardPixmap.SP_ArrowForward))
+        self.voice_button.setIcon(style.standardIcon(QStyle.StandardPixmap.SP_MediaVolume))
+        self.empty_voice_button.setIcon(style.standardIcon(QStyle.StandardPixmap.SP_MediaVolume))
+        self.voice_mode_button.setIcon(style.standardIcon(QStyle.StandardPixmap.SP_MediaPlay))
+        self.empty_voice_mode_button.setIcon(style.standardIcon(QStyle.StandardPixmap.SP_MediaPlay))
+        self._sync_voice_mode_buttons()
         self.copy_blueprint_button.setIcon(style.standardIcon(QStyle.StandardPixmap.SP_FileDialogContentsView))
         self.send_blueprint_button.setIcon(style.standardIcon(QStyle.StandardPixmap.SP_ArrowForward))
         self.generate_blueprint_button.setIcon(style.standardIcon(QStyle.StandardPixmap.SP_CommandLink))
@@ -1122,12 +1250,25 @@ class LunaMainWindow(QMainWindow):
         self.empty_message_input.setPlaceholderText("Napis Lune cokoli...")
         self.empty_message_input.submit_requested.connect(self.send_message)
 
+        self.empty_voice_button = QPushButton("Mic")
+        self.empty_voice_button.setObjectName("composerVoiceButton")
+        self.empty_voice_button.clicked.connect(self.start_voice_input)
+        self.empty_voice_button.setToolTip("Mluv s Lunou pres mikrofon")
+
+        self.empty_voice_mode_button = QPushButton("Voice")
+        self.empty_voice_mode_button.setObjectName("composerVoiceModeButton")
+        self.empty_voice_mode_button.setCheckable(True)
+        self.empty_voice_mode_button.clicked.connect(self.toggle_voice_mode)
+        self.empty_voice_mode_button.setToolTip("Zapne hlasovy rezim")
+
         self.empty_send_button = QPushButton("Send")
         self.empty_send_button.setObjectName("sendButton")
         self.empty_send_button.clicked.connect(self.send_message)
 
         empty_composer_layout.addWidget(self.empty_plus_button)
         empty_composer_layout.addWidget(self.empty_message_input, 1)
+        empty_composer_layout.addWidget(self.empty_voice_button)
+        empty_composer_layout.addWidget(self.empty_voice_mode_button)
         empty_composer_layout.addWidget(self.empty_send_button)
 
         empty_center_layout.addWidget(empty_title, alignment=Qt.AlignmentFlag.AlignCenter)
@@ -1192,12 +1333,25 @@ class LunaMainWindow(QMainWindow):
         self.message_input.setPlaceholderText("Napis Lune cokoli...")
         self.message_input.submit_requested.connect(self.send_message)
 
+        self.voice_button = QPushButton("Mic")
+        self.voice_button.setObjectName("composerVoiceButton")
+        self.voice_button.clicked.connect(self.start_voice_input)
+        self.voice_button.setToolTip("Mluv s Lunou pres mikrofon")
+
+        self.voice_mode_button = QPushButton("Voice")
+        self.voice_mode_button.setObjectName("composerVoiceModeButton")
+        self.voice_mode_button.setCheckable(True)
+        self.voice_mode_button.clicked.connect(self.toggle_voice_mode)
+        self.voice_mode_button.setToolTip("Zapne hlasovy rezim")
+
         self.send_button = QPushButton("Send")
         self.send_button.setObjectName("sendButton")
         self.send_button.clicked.connect(self.send_message)
 
         inner_layout.addWidget(self.plus_button)
         inner_layout.addWidget(self.message_input, 1)
+        inner_layout.addWidget(self.voice_button)
+        inner_layout.addWidget(self.voice_mode_button)
         inner_layout.addWidget(self.send_button)
         composer_layout.addWidget(self.composer)
 
@@ -1303,6 +1457,9 @@ class LunaMainWindow(QMainWindow):
         self.task_next_step_label = QLabel("Next step: Create or select a project to start planning.")
         self.task_next_step_label.setObjectName("settingsFieldHelper")
         self.task_next_step_label.setWordWrap(True)
+        self.task_execution_summary = QLabel("No recent execution activity yet.")
+        self.task_execution_summary.setObjectName("settingsFieldHelper")
+        self.task_execution_summary.setWordWrap(True)
         self.task_detail_label = QLabel("Select a task to see more detail.")
         self.task_detail_label.setObjectName("settingsFieldHelper")
         self.task_detail_label.setWordWrap(True)
@@ -1315,6 +1472,12 @@ class LunaMainWindow(QMainWindow):
         self.task_mark_done_button = QPushButton("Mark done")
         self.task_mark_done_button.setObjectName("secondaryButton")
         self.task_mark_done_button.clicked.connect(self.mark_selected_task_done)
+        self.task_run_next_button = QPushButton("Run next step")
+        self.task_run_next_button.setObjectName("secondaryButton")
+        self.task_run_next_button.clicked.connect(self.run_next_task_action)
+        self.task_run_chain_button = QPushButton("Run next chain")
+        self.task_run_chain_button.setObjectName("secondaryButton")
+        self.task_run_chain_button.clicked.connect(self.run_next_task_chain)
         self.task_run_button = QPushButton("Run task action")
         self.task_run_button.setObjectName("secondaryButton")
         self.task_run_button.clicked.connect(self.run_selected_task_action)
@@ -1322,6 +1485,8 @@ class LunaMainWindow(QMainWindow):
         self.task_send_button.setObjectName("secondaryButton")
         self.task_send_button.clicked.connect(self.send_selected_task_to_chat)
         task_actions.addWidget(self.task_mark_done_button)
+        task_actions.addWidget(self.task_run_next_button)
+        task_actions.addWidget(self.task_run_chain_button)
         task_actions.addWidget(self.task_run_button)
         task_actions.addWidget(self.task_send_button)
         task_actions.addStretch()
@@ -1351,6 +1516,7 @@ class LunaMainWindow(QMainWindow):
         task_layout.addWidget(self.task_phase_label)
         task_layout.addWidget(self.xeno_status_label)
         task_layout.addWidget(self.task_next_step_label)
+        task_layout.addWidget(self.task_execution_summary)
         task_layout.addWidget(self.task_detail_label)
         task_layout.addWidget(self.task_list)
         task_layout.addLayout(task_actions)
@@ -1788,12 +1954,25 @@ class LunaMainWindow(QMainWindow):
         self.settings_reasoning_box.setObjectName("settingsSelect")
         self.settings_reasoning_box.addItems(["black_box", "white_box"])
 
+        self.settings_intelligence_level = QComboBox()
+        self.settings_intelligence_level.setObjectName("settingsSelect")
+        self.settings_intelligence_level.addItems(["3", "4", "5"])
+
         self.settings_internet_enabled = QCheckBox("Allow Luna to use internet support when needed")
         self.settings_internet_enabled.setObjectName("settingsCheck")
 
         self.settings_internet_mode = QComboBox()
         self.settings_internet_mode.setObjectName("settingsSelect")
         self.settings_internet_mode.addItems(["auto", "manual"])
+
+        self.settings_system_control = QComboBox()
+        self.settings_system_control.setObjectName("settingsSelect")
+        self.settings_system_control.addItems(["observe", "assist", "operator"])
+
+        self.settings_system_control_summary = QTextEdit()
+        self.settings_system_control_summary.setObjectName("studioOutput")
+        self.settings_system_control_summary.setReadOnly(True)
+        self.settings_system_control_summary.setMinimumHeight(132)
 
         self.settings_agent_mode = QComboBox()
         self.settings_agent_mode.setObjectName("settingsSelect")
@@ -1806,6 +1985,13 @@ class LunaMainWindow(QMainWindow):
         self.settings_allow_file_changes = QCheckBox("Allow Luna and agents to create or modify local files")
         self.settings_allow_file_changes.setObjectName("settingsCheck")
 
+        self.settings_system_control.currentTextChanged.connect(lambda _value: self._refresh_system_control_preview())
+        self.settings_agent_mode.currentTextChanged.connect(lambda _value: self._refresh_system_control_preview())
+        self.settings_intelligence_level.currentTextChanged.connect(lambda _value: self._refresh_system_control_preview())
+        self.settings_allow_app_launch.stateChanged.connect(lambda _value: self._refresh_system_control_preview())
+        self.settings_allow_path_open.stateChanged.connect(lambda _value: self._refresh_system_control_preview())
+        self.settings_allow_file_changes.stateChanged.connect(lambda _value: self._refresh_system_control_preview())
+
         self.settings_action_log = QTextEdit()
         self.settings_action_log.setObjectName("studioOutput")
         self.settings_action_log.setReadOnly(True)
@@ -1815,9 +2001,12 @@ class LunaMainWindow(QMainWindow):
         connection_layout.addWidget(self._make_settings_field("API Token", self.settings_token, "Stored locally for this workspace."))
         connection_layout.addWidget(self._make_settings_field("Request timeout", self.settings_timeout, "Increase this if your model loads slowly or replies take longer."))
         connection_layout.addWidget(self._make_settings_field("Default reasoning style", self.settings_reasoning_box))
+        connection_layout.addWidget(self._make_settings_field("System intelligence level", self.settings_intelligence_level, "3 = lighter and faster, 4 = balanced, 5 = deeper Luna + Xeno planning."))
         connection_layout.addWidget(self.settings_internet_enabled)
         connection_layout.addWidget(self._make_settings_field("Internet mode", self.settings_internet_mode))
-        connection_layout.addWidget(self._make_settings_field("Agent execution mode", self.settings_agent_mode, "Ask = require confirmation, Auto = run immediately, Block = refuse local actions."))
+        connection_layout.addWidget(self._make_settings_field("System control layer", self.settings_system_control, "Observe = no local execution, Assist = ask first, Operator = execute immediately."))
+        connection_layout.addWidget(self._make_settings_field("Control summary", self.settings_system_control_summary, "This is the current system control state Luna and the agents follow."))
+        connection_layout.addWidget(self._make_settings_field("Agent execution mode", self.settings_agent_mode, "Advanced override. Ask = require confirmation, Auto = run immediately, Block = refuse local actions."))
         connection_layout.addWidget(self.settings_allow_app_launch)
         connection_layout.addWidget(self.settings_allow_path_open)
         connection_layout.addWidget(self.settings_allow_file_changes)
@@ -2276,8 +2465,11 @@ class LunaMainWindow(QMainWindow):
             title = task.get("title", "Task")
             status = task.get("status", "pending").replace("_", " ")
             description = task.get("description", "")
+            handoff_note = task.get("handoff_note", "")
+            tool = task.get("tool", "")
             item = QListWidgetItem(f"{status.title()} - {title}")
-            item.setToolTip(description)
+            tooltip_parts = [str(description).strip(), str(handoff_note).strip(), f"Tool: {tool}" if tool else ""]
+            item.setToolTip("\n".join(part for part in tooltip_parts if part))
             item.setData(Qt.ItemDataRole.UserRole, task)
             self.task_list.addItem(item)
 
@@ -2302,12 +2494,38 @@ class LunaMainWindow(QMainWindow):
         if attachment_names:
             self.project_memory_list.addItem(QListWidgetItem("Linked files: " + ", ".join(str(name) for name in attachment_names)))
 
+
+    def _update_execution_summary(self, project: dict[str, object] | None) -> None:
+        if project is None:
+            self.task_execution_summary.setText("No recent execution activity yet.")
+            return
+
+        memory_entries = project.get("memory_entries", [])
+        if not isinstance(memory_entries, list):
+            memory_entries = []
+
+        execution_entries: list[str] = []
+        for raw_entry in memory_entries:
+            entry = str(raw_entry).strip()
+            lowered = entry.lower()
+            if lowered.startswith(("agent action:", "agent failed:", "task updated:")):
+                execution_entries.append(entry)
+            if len(execution_entries) >= 3:
+                break
+
+        if not execution_entries:
+            self.task_execution_summary.setText("No recent execution activity yet.")
+            return
+
+        self.task_execution_summary.setText("\n\n".join(execution_entries))
+
     def _load_project_into_studio(self, project: dict[str, object] | None) -> None:
         if project is None:
             self.project_title_label.setText("No project selected")
             self.studio_input.clear()
             self.studio_output.clear()
             self._update_task_center([], "draft", "Create or select a project to start planning.")
+            self._update_execution_summary(None)
             self._update_project_memory(None)
             return
 
@@ -2317,12 +2535,15 @@ class LunaMainWindow(QMainWindow):
         tasks = project.get("tasks", [])
         if not isinstance(tasks, list):
             tasks = []
+        handoff_summary = str(project.get("handoff_summary", "")).strip()
+        fallback_note = f"Xeno note: phase {str(project.get('current_phase', 'draft')).replace('_', ' ')} ready. Agent steps are available for Luna as hidden operational support."
         self._update_task_center(
             tasks,
             str(project.get("current_phase", "draft")),
             str(project.get("next_step", "Create a project blueprint.")),
-            f"Xeno note: phase {str(project.get('current_phase', 'draft')).replace('_', ' ')} ready. Agent steps are available for Luna as hidden operational support.",
+            handoff_summary or fallback_note,
         )
+        self._update_execution_summary(project)
         self._update_project_memory(project)
 
     def _on_project_selected(self, item: QListWidgetItem) -> None:
@@ -2337,7 +2558,19 @@ class LunaMainWindow(QMainWindow):
         if not isinstance(task, dict):
             self.task_detail_label.setText("Select a task to see more detail.")
             return
-        self.task_detail_label.setText(str(task.get("description", "No details available.")))
+        lines = [str(task.get("description", "No details available."))]
+        handoff_note = str(task.get("handoff_note", "")).strip()
+        dependencies = str(task.get("dependencies", "")).strip()
+        tool = str(task.get("tool", "")).strip()
+        risk = str(task.get("risk", "")).strip()
+        if handoff_note:
+            lines.append(f"Agent handoff: {handoff_note}")
+        if dependencies:
+            lines.append(f"Depends on: {dependencies}")
+        meta = " | ".join(part for part in [f"Tool: {tool}" if tool else "", f"Risk: {risk}" if risk else ""] if part)
+        if meta:
+            lines.append(meta)
+        self.task_detail_label.setText("\n\n".join(lines))
 
     def _clear_attachment_layout(self, layout: QHBoxLayout) -> None:
         while layout.count():
@@ -2434,15 +2667,43 @@ class LunaMainWindow(QMainWindow):
         task = item.data(Qt.ItemDataRole.UserRole)
         if not isinstance(task, dict):
             return
-        result = self.engine.run_agent_task_action(str(project.get("id", "")), str(task.get("title", "")))
-        if not result.get("ok"):
-            QMessageBox.information(self, "Task Center", str(result.get("message", "Action could not be completed.")))
-            return
+        result = self.engine.run_agent_task_action(str(project.get("id", "")), task)
         refreshed_project = result.get("project")
         if isinstance(refreshed_project, dict):
             self._load_project_into_studio(refreshed_project)
             self._refresh_project_list()
         self.xeno_status_label.setText(str(result.get("message", "Task agent completed an action.")))
+        if not result.get("ok"):
+            QMessageBox.information(self, "Task Center", str(result.get("message", "Action could not be completed.")))
+            return
+
+    def run_next_task_action(self) -> None:
+        project = self.engine.get_current_project()
+        if project is None:
+            QMessageBox.information(self, "Task Center", "Select a project first.")
+            return
+        result = self.engine.run_next_agent_task(str(project.get("id", "")))
+        refreshed_project = result.get("project")
+        if isinstance(refreshed_project, dict):
+            self._load_project_into_studio(refreshed_project)
+            self._refresh_project_list()
+        self.xeno_status_label.setText(str(result.get("message", "Agent prepared the next step.")))
+        if not result.get("ok"):
+            QMessageBox.information(self, "Task Center", str(result.get("message", "No next agent step is ready.")))
+
+    def run_next_task_chain(self) -> None:
+        project = self.engine.get_current_project()
+        if project is None:
+            QMessageBox.information(self, "Task Center", "Select a project first.")
+            return
+        result = self.engine.run_next_agent_chain(str(project.get("id", "")))
+        refreshed_project = result.get("project")
+        if isinstance(refreshed_project, dict):
+            self._load_project_into_studio(refreshed_project)
+            self._refresh_project_list()
+        self.xeno_status_label.setText(str(result.get("message", "Agent chain finished.")))
+        if not result.get("ok"):
+            QMessageBox.information(self, "Task Center", str(result.get("message", "Agent chain could not be completed.")))
 
     def save_project_note(self) -> None:
         project = self.engine.get_current_project()
@@ -2533,6 +2794,22 @@ class LunaMainWindow(QMainWindow):
             self._action_log_cache = text
             self.settings_action_log.setPlainText(text)
 
+    def _refresh_system_control_preview(self) -> None:
+        if not hasattr(self, "settings_system_control_summary"):
+            return
+        profile_key = self.settings_system_control.currentText().strip().lower() or "assist"
+        profile = self.engine.system_control.PROFILES[self.engine.system_control.normalize_profile(profile_key)]
+        action_mode = self.settings_agent_mode.currentText().strip().lower() or profile.agent_mode
+        lines = [
+            f"Profile: {profile.label}",
+            profile.description,
+            f"Execution mode: {action_mode}",
+            f"System intelligence: level {self.settings_intelligence_level.currentText().strip() or '4'}",
+            f"App launch: {'enabled' if self.settings_allow_app_launch.isChecked() else 'blocked'}",
+            f"Path open: {'enabled' if self.settings_allow_path_open.isChecked() else 'blocked'}",
+            f"File changes: {'enabled' if self.settings_allow_file_changes.isChecked() else 'blocked'}",
+        ]
+        self.settings_system_control_summary.setPlainText("\n".join(lines))
     def _load_settings_values(self) -> None:
         settings = self.engine.settings
         workspace = self.engine.user_settings.data
@@ -2540,9 +2817,12 @@ class LunaMainWindow(QMainWindow):
         self.settings_token.setText(settings.lm_studio_api_token)
         self.settings_timeout.setText(str(settings.lm_studio_timeout_seconds))
         self.settings_reasoning_box.setCurrentText(settings.default_reasoning_box)
+        self.settings_intelligence_level.setCurrentText(workspace.intelligence_level or "4")
         self.settings_internet_enabled.setChecked(bool(settings.internet_enabled))
         self.settings_internet_mode.setCurrentText(settings.internet_mode)
+        self.settings_system_control.setCurrentText(workspace.system_control_profile or "assist")
         self.settings_agent_mode.setCurrentText(workspace.agent_execution_mode)
+        self.settings_system_control_summary.setPlainText(self.engine.get_system_control_summary())
         self.settings_allow_app_launch.setChecked(bool(workspace.allow_app_launch))
         self.settings_allow_path_open.setChecked(bool(workspace.allow_path_open))
         self.settings_allow_file_changes.setChecked(bool(workspace.allow_file_changes))
@@ -2565,6 +2845,7 @@ class LunaMainWindow(QMainWindow):
         self.settings_cloud_root_path.setText(workspace.cloud_root_path)
         self.settings_cloud_account_email.setText(workspace.cloud_account_email)
         self.settings_cloud_auto_sync.setChecked(bool(workspace.cloud_auto_sync))
+        self._refresh_system_control_preview()
         self._refresh_action_log_view(force=True)
         self._refresh_library_view()
 
@@ -2573,8 +2854,10 @@ class LunaMainWindow(QMainWindow):
         token = self.settings_token.text().strip()
         timeout_text = self.settings_timeout.text().strip()
         reasoning_box = self.settings_reasoning_box.currentText().strip()
+        intelligence_level = self.settings_intelligence_level.currentText().strip() or "4"
         internet_enabled = self.settings_internet_enabled.isChecked()
         internet_mode = self.settings_internet_mode.currentText().strip()
+        control_profile = self.settings_system_control.currentText().strip()
         agent_mode = self.settings_agent_mode.currentText().strip()
         allow_app_launch = self.settings_allow_app_launch.isChecked()
         allow_path_open = self.settings_allow_path_open.isChecked()
@@ -2620,6 +2903,7 @@ class LunaMainWindow(QMainWindow):
         self.engine.internet.set_enabled(internet_enabled)
         self.engine.internet.set_mode(internet_mode)
 
+        self.engine.set_system_control_profile(control_profile)
         workspace = self.engine.user_settings.data
         workspace.unreal_engine_path = self.settings_unreal_path.text().strip()
         workspace.blender_path = self.settings_blender_path.text().strip()
@@ -2635,6 +2919,8 @@ class LunaMainWindow(QMainWindow):
         workspace.github_username = self.settings_github_username.text().strip()
         workspace.github_token = self.settings_github_token.text().strip()
         workspace.google_email = self.settings_google_email.text().strip()
+        workspace.system_control_profile = control_profile
+        workspace.intelligence_level = intelligence_level
         workspace.cloud_enabled = cloud_enabled
         workspace.cloud_provider = cloud_provider
         workspace.cloud_root_path = cloud_root_path
@@ -2645,6 +2931,7 @@ class LunaMainWindow(QMainWindow):
         workspace.allow_path_open = allow_path_open
         workspace.allow_file_changes = allow_file_changes
         self.engine.user_settings.save(workspace)
+        self._refresh_system_control_preview()
         self._refresh_action_log_view(force=True)
         self._refresh_library_view()
 
@@ -2865,6 +3152,104 @@ class LunaMainWindow(QMainWindow):
         elif chosen == more_action:
             QMessageBox.information(self, "Vice", "Dalsi nastroje pridame do tohoto menu pozdeji.")
 
+    def _sync_voice_mode_buttons(self) -> None:
+        if hasattr(self, "voice_mode_button"):
+            self.voice_mode_button.blockSignals(True)
+            self.voice_mode_button.setChecked(self.voice_mode_enabled)
+            self.voice_mode_button.setText("Voice on" if self.voice_mode_enabled else "Voice")
+            self.voice_mode_button.blockSignals(False)
+        if hasattr(self, "empty_voice_mode_button"):
+            self.empty_voice_mode_button.blockSignals(True)
+            self.empty_voice_mode_button.setChecked(self.voice_mode_enabled)
+            self.empty_voice_mode_button.setText("Voice on" if self.voice_mode_enabled else "Voice")
+            self.empty_voice_mode_button.blockSignals(False)
+
+    def toggle_voice_mode(self) -> None:
+        self.voice_mode_enabled = not self.voice_mode_enabled
+        self._sync_voice_mode_buttons()
+        if self.voice_mode_enabled and self.worker_thread is None and self.reveal_timer is None and self.voice_thread is None and self.voice_output_thread is None:
+            QTimer.singleShot(0, self.start_voice_input)
+
+    def _set_voice_listening(self, listening: bool) -> None:
+        self.voice_listening = listening
+        voice_text = "Listening" if listening else "Mic"
+        voice_tip = "Luna posloucha pres mikrofon" if listening else "Mluv s Lunou pres mikrofon"
+        disabled = listening or self.worker_thread is not None or self.reveal_timer is not None or self.voice_output_thread is not None
+        if hasattr(self, "voice_button"):
+            self.voice_button.setText(voice_text)
+            self.voice_button.setToolTip(voice_tip)
+            self.voice_button.setDisabled(disabled)
+        if hasattr(self, "empty_voice_button"):
+            self.empty_voice_button.setText(voice_text)
+            self.empty_voice_button.setToolTip(voice_tip)
+            self.empty_voice_button.setDisabled(disabled)
+
+    def _start_voice_output(self, response: str) -> None:
+        if self.voice_output_thread is not None:
+            return
+        spoken_text = response.removeprefix("Luna: ").strip() or response.strip()
+        self.voice_output_thread = QThread(self)
+        self.voice_output_worker = VoiceOutputWorker(spoken_text)
+        self.voice_output_worker.moveToThread(self.voice_output_thread)
+        self.voice_output_thread.started.connect(self.voice_output_worker.run)
+        self.voice_output_worker.finished.connect(self._handle_voice_output_finished)
+        self.voice_output_worker.finished.connect(self.voice_output_thread.quit)
+        self.voice_output_thread.finished.connect(self.voice_output_worker.deleteLater)
+        self.voice_output_thread.finished.connect(self.voice_output_thread.deleteLater)
+        self.voice_output_thread.start()
+
+    def _handle_voice_output_finished(self, error: str) -> None:
+        if self.voice_output_thread is not None:
+            self.voice_output_thread = None
+        self.voice_output_worker = None
+        if error:
+            QMessageBox.information(self, "Hlas Luny", error)
+        if self.voice_mode_enabled and self.worker_thread is None and self.reveal_timer is None and self.voice_thread is None:
+            QTimer.singleShot(220, self.start_voice_input)
+
+    def start_voice_input(self) -> None:
+        if self.worker_thread is not None or self.reveal_timer is not None or self.voice_thread is not None or self.voice_output_thread is not None:
+            return
+
+        self._auto_send_voice_input = True
+        self.voice_thread = QThread(self)
+        self.voice_worker = VoiceInputWorker()
+        self.voice_worker.moveToThread(self.voice_thread)
+        self.voice_thread.started.connect(self.voice_worker.run)
+        self.voice_worker.finished.connect(self._handle_voice_finished)
+        self.voice_worker.finished.connect(self.voice_thread.quit)
+        self.voice_thread.finished.connect(self.voice_worker.deleteLater)
+        self.voice_thread.finished.connect(self.voice_thread.deleteLater)
+        self._set_voice_listening(True)
+        self.voice_thread.start()
+
+    def _handle_voice_finished(self, transcript: str, error: str) -> None:
+        self._set_voice_listening(False)
+        if self.voice_thread is not None:
+            self.voice_thread = None
+        self.voice_worker = None
+
+        if error:
+            if self.voice_mode_enabled:
+                QTimer.singleShot(350, self.start_voice_input)
+            else:
+                QMessageBox.information(self, "Mikrofon", error)
+            return
+
+        target = self._active_input()
+        existing = target.toPlainText().strip()
+        if existing:
+            target.setPlainTextAndMoveToEnd((existing + "\n" + transcript).strip())
+
+            target.setFocus()
+            return
+
+        target.setPlainTextAndMoveToEnd(transcript)
+        target.setFocus()
+        self._speak_next_response = self._auto_send_voice_input or self.voice_mode_enabled
+        self._auto_send_voice_input = False
+        QTimer.singleShot(0, self.send_message)
+
     def _remove_thinking_placeholder(self) -> None:
         if self.pending_thinking is not None:
             self.pending_thinking.stop()
@@ -2888,6 +3273,10 @@ class LunaMainWindow(QMainWindow):
         self.empty_message_input.setDisabled(busy)
         self.send_button.setDisabled(busy)
         self.empty_send_button.setDisabled(busy)
+        self.voice_button.setDisabled(busy or self.voice_listening or self.voice_output_thread is not None)
+        self.empty_voice_button.setDisabled(busy or self.voice_listening or self.voice_output_thread is not None)
+        self.voice_mode_button.setDisabled(busy)
+        self.empty_voice_mode_button.setDisabled(busy)
         self.new_chat_button.setDisabled(busy)
         self.chat_search_input.setDisabled(busy)
         self.chat_list.setDisabled(busy)
@@ -2900,6 +3289,8 @@ class LunaMainWindow(QMainWindow):
         self.send_blueprint_button.setDisabled(busy)
         self.create_project_button.setDisabled(busy)
         self.task_mark_done_button.setDisabled(busy)
+        self.task_run_next_button.setDisabled(busy)
+        self.task_run_chain_button.setDisabled(busy)
         self.task_run_button.setDisabled(busy)
         self.task_send_button.setDisabled(busy)
         self.project_note_input.setDisabled(busy)
@@ -2956,6 +3347,9 @@ class LunaMainWindow(QMainWindow):
         self._start_response_reveal(response)
         self._refresh_chat_list()
         self._update_empty_state()
+        if self._speak_next_response or self.voice_mode_enabled:
+            self._start_voice_output(response)
+        self._speak_next_response = False
         QTimer.singleShot(0, self._scroll_chat_to_bottom)
 
     def send_message(self) -> None:
@@ -3015,6 +3409,22 @@ class LunaMainWindow(QMainWindow):
                 self.worker_thread.wait(250)
             self.worker_thread = None
             self.worker = None
+        if self.voice_thread is not None:
+            self.voice_thread.requestInterruption()
+            self.voice_thread.quit()
+            if not self.voice_thread.wait(1000):
+                self.voice_thread.terminate()
+                self.voice_thread.wait(250)
+            self.voice_thread = None
+            self.voice_worker = None
+        if self.voice_output_thread is not None:
+            self.voice_output_thread.requestInterruption()
+            self.voice_output_thread.quit()
+            if not self.voice_output_thread.wait(1000):
+                self.voice_output_thread.terminate()
+                self.voice_output_thread.wait(250)
+            self.voice_output_thread = None
+            self.voice_output_worker = None
         QApplication.quit()
         super().closeEvent(event)
 
@@ -3375,6 +3785,58 @@ class LunaMainWindow(QMainWindow):
                 border-radius: 14px;
             }}
 
+            #composerVoiceButton {{
+                background: transparent;
+                color: #d4d4d4;
+                border: 1px solid transparent;
+                border-radius: 14px;
+                padding: 9px 12px;
+                font-size: 12px;
+                font-weight: 600;
+                min-width: 74px;
+            }}
+
+            #composerVoiceButton:hover {{
+                color: #ffffff;
+                background: rgba(255, 255, 255, 0.06);
+                border: 1px solid #363636;
+            }}
+
+            #composerVoiceButton:disabled {{
+                color: #bcbcbc;
+                background: #2b2b2b;
+                border: 1px solid #343434;
+            }}
+
+            #composerVoiceModeButton {{
+                background: #202020;
+                color: #d8d8d8;
+                border: 1px solid #343434;
+                border-radius: 14px;
+                padding: 9px 12px;
+                font-size: 12px;
+                font-weight: 600;
+                min-width: 82px;
+            }}
+
+            #composerVoiceModeButton:hover {{
+                background: #272727;
+                border: 1px solid #3a3a3a;
+                color: #ffffff;
+            }}
+
+            #composerVoiceModeButton:checked {{
+                background: #f2f2f2;
+                color: #151515;
+                border: 1px solid #f2f2f2;
+            }}
+
+            #composerVoiceModeButton:disabled {{
+                color: #bcbcbc;
+                background: #2b2b2b;
+                border: 1px solid #343434;
+            }}
+
             #messageInput {{
                 background: transparent;
                 color: {TEXT};
@@ -3522,6 +3984,20 @@ class LunaDesktopApp:
         self.window = LunaMainWindow(self.engine)
         self.window.show()
         app.exec()
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 

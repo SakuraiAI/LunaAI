@@ -3,6 +3,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from uuid import uuid4
 
+from app.core.text_utils import repair_text
+
 
 @dataclass(slots=True)
 class ChatMemory:
@@ -58,7 +60,7 @@ class ChatMemory:
         if isinstance(raw_titles, dict):
             for session_id, title in raw_titles.items():
                 if isinstance(session_id, str) and isinstance(title, str):
-                    self.titles[session_id] = title.strip() or self._default_title(session_id)
+                    self.titles[session_id] = repair_text(title).strip() or self._default_title(session_id)
 
         current_session_id = data.get("current_session_id")
         if isinstance(current_session_id, str) and current_session_id:
@@ -75,7 +77,7 @@ class ChatMemory:
             role = item.get("role")
             content = item.get("content")
             if isinstance(role, str) and isinstance(content, str):
-                history.append({"role": role, "content": content})
+                history.append({"role": role, "content": repair_text(content)})
         return history
 
     def _persist(self) -> None:
@@ -102,7 +104,7 @@ class ChatMemory:
         if current_title.strip() != default_title:
             return
 
-        title = " ".join(message.strip().split())
+        title = " ".join(repair_text(message).strip().split())
         if not title:
             return
         if len(title) > 38:
@@ -111,7 +113,7 @@ class ChatMemory:
 
     def save_message(self, role: str, message: str) -> None:
         self._ensure_session(self.current_session_id)
-        entry = {"role": role, "content": message}
+        entry = {"role": role, "content": repair_text(message)}
         self.sessions[self.current_session_id].append(entry)
         self.history = list(self.sessions[self.current_session_id])
         if role == "user":

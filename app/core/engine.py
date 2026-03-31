@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 from typing import Callable
+from collections import OrderedDict
 import re
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
@@ -9,6 +10,7 @@ from config.settings import AppSettings
 from app.core.action_log import ActionLogStore
 from app.core.library_store import LibraryStore
 from app.core.memory_coordinator import MemoryCoordinator
+from app.core.system_control import SystemControlLayer
 from app.core.prompt_builder import PromptBuilder
 from app.core.project_store import ProjectStore
 from app.core.runtime_status import RuntimeStatusFormatter
@@ -20,6 +22,7 @@ from app.tools.desktop_actions import DesktopActionTool
 from app.tools.internet import InternetTool
 from app.workflow.manager import WorkflowManager
 from app.xeno.coordinator import XenoCoordinator
+from app.core.text_utils import repair_text
 
 
 class LunaEngine:
@@ -43,6 +46,8 @@ class LunaEngine:
         self.projects = ProjectStore(Path(self.settings.projects_path))
         self.library = LibraryStore(Path(self.settings.library_path))
         self.action_log = ActionLogStore(Path("data/logs/action_log.jsonl"))
+        self.system_control = SystemControlLayer()
+        self.system_control.apply_profile(self.user_settings.data, self.user_settings.data.system_control_profile)
         self.pending_action: tuple[str, str, Callable[[], str]] | None = None
 
         try:
@@ -79,11 +84,16 @@ class LunaEngine:
             "blueprint_text": record.blueprint_text,
             "next_step": record.next_step,
             "current_phase": record.current_phase,
+            "handoff_summary": getattr(record, "handoff_summary", ""),
             "tasks": list(record.tasks),
             "memory_entries": list(record.memory_entries),
             "decisions": list(record.decisions),
             "attachment_names": list(record.attachment_names),
         }
+
+    def _normalized_intelligence_level(self) -> str:
+        level = str(getattr(self.user_settings.data, "intelligence_level", "4") or "4").strip()
+        return level if level in {"3", "4", "5"} else "4"
 
     def _handle_internet_command(self, user_input: str) -> str | None:
         command = user_input.strip().lower()
@@ -120,7 +130,12 @@ class LunaEngine:
     def _hidden_xeno_support(self, user_input: str) -> str:
         if not self.xeno.should_consult(user_input):
             return ""
-        return self.xeno.build_hidden_support(user_input)
+        level = self._normalized_intelligence_level()
+        parts = [self.xeno.build_hidden_support(user_input, intelligence_level=level)]
+        model_support = self.xeno.build_model_support(user_input, self.model.generate, intelligence_level=level)
+        if model_support:
+            parts.append("Hidden Xeno model guidance:\n" + model_support)
+        return "\n".join(part for part in parts if part.strip())
 
     def _action_mode(self) -> str:
         mode = str(self.user_settings.data.agent_execution_mode or "ask").strip().lower()
@@ -141,6 +156,78 @@ class LunaEngine:
     def _log_action(self, category: str, title: str, status: str, detail: str) -> None:
         self.action_log.record(category=category, title=title, status=status, detail=detail)
 
+    def _configured_connected_apps(self) -> list[str]:
+        workspace = self.user_settings.data
+        app_fields = OrderedDict([
+            ("VS Code", workspace.vscode_path),
+            ("Blender", workspace.blender_path),
+            ("Unreal Engine 5", workspace.unreal_engine_path),
+            ("Unity", workspace.unity_path),
+            ("Photoshop", workspace.photoshop_path),
+            ("DaVinci Resolve", workspace.davinci_resolve_path),
+            ("Premiere Pro", workspace.premiere_pro_path),
+            ("After Effects", workspace.after_effects_path),
+            ("Figma", workspace.figma_path),
+            ("FL Studio", workspace.fl_studio_path),
+            ("Substance 3D Painter", workspace.substance_painter_path),
+        ])
+        return [name for name, path in app_fields.items() if str(path).strip()]
+
+    def describe_local_capabilities(self) -> str:
+        workspace = self.user_settings.data
+        lines = [
+            "Luna local control overview:",
+            f"System control profile: {workspace.system_control_profile}",
+            f"Agent execution mode: {workspace.agent_execution_mode}",
+            f"App launch: {'enabled' if workspace.allow_app_launch else 'blocked'}",
+            f"Path open: {'enabled' if workspace.allow_path_open else 'blocked'}",
+            f"File changes: {'enabled' if workspace.allow_file_changes else 'blocked'}",
+        ]
+        connected_apps = self._configured_connected_apps()
+        if connected_apps:
+            lines.append("Connected apps: " + ", ".join(connected_apps))
+        else:
+            lines.append("Connected apps: none yet")
+        lines.extend([
+            "Local actions Luna can handle right now:",
+            "- open connected apps and workspaces",
+            "- open files and folders",
+            "- create folders and files",
+            "- overwrite or append file content",
+            "- scaffold python, web, and pyside projects",
+            "- run agent task actions from project flow",
+            "Registered task actions: " + ", ".join(item["action_key"] for item in self.desktop_actions.list_registered_actions()),
+        ])
+        return "\n".join(lines)
+
+    def _handle_local_capability_command(self, user_input: str) -> str | None:
+        normalized = " ".join(user_input.strip().lower().split())
+        triggers = {
+            "co umis na pc",
+            "co umis delat na pc",
+            "co umis delat v pc",
+            "co umis lokalne",
+            "jake aplikace mas napojene",
+            "jake appky mas napojene",
+            "what can you do on this pc",
+            "what local actions can you do",
+            "what apps are connected",
+        }
+        if normalized in triggers:
+            return self.describe_local_capabilities()
+        return None
+    def list_system_control_profiles(self) -> list[dict[str, str]]:
+        return self.system_control.list_profiles()
+
+    def get_system_control_summary(self) -> str:
+        return self.system_control.profile_summary(self.user_settings.data)
+
+    def set_system_control_profile(self, profile_key: str) -> str:
+        workspace = self.system_control.apply_profile(self.user_settings.data, profile_key)
+        self.user_settings.save(workspace)
+        summary = self.system_control.profile_summary(workspace)
+        self._log_action("system_control", f"control profile -> {workspace.system_control_profile}", "completed", summary)
+        return summary
     def list_recent_actions(self, limit: int = 8) -> list[dict[str, str]]:
         return [
             {
@@ -164,29 +251,105 @@ class LunaEngine:
                 lines.append(entry["detail"])
         return "\n\n".join(lines)
 
-    def _guarded_action(self, category: str, title: str, callback: Callable[[], str]) -> str:
+    def _coerce_action_result(self, raw: object, *, category: str, title: str) -> dict[str, object]:
+        if isinstance(raw, dict):
+            result = dict(raw)
+        else:
+            message = repair_text(str(raw)).strip()
+            result = {
+                "ok": True,
+                "status": "completed",
+                "message": message,
+                "detail": message,
+            }
+        result.setdefault("ok", True)
+        result.setdefault("status", "completed")
+        result.setdefault("message", "Action finished.")
+        result.setdefault("detail", str(result.get("message", "")).strip())
+        result.setdefault("category", category)
+        result.setdefault("action_key", title)
+        return result
+
+    def _format_action_result_for_chat(self, result: dict[str, object], *, pending: bool = False) -> str:
+        status = str(result.get("status", "completed")).strip().lower()
+        message = repair_text(str(result.get("message", "")).strip())
+        detail = repair_text(str(result.get("detail", "")).strip())
+        if pending:
+            return "Luna: Akce je pripravena. Potvrd ji pres Accept nebo ji zrus pres Cancel."
+        if status == "blocked":
+            return f"Luna: Akce je blokovana. {detail or message}".strip()
+        if status == "failed":
+            return f"Luna: Akce se nepovedla. {detail or message}".strip()
+        if status == "cancelled":
+            return f"Luna: Akci jsem zrusila. {detail or message}".strip()
+        return f"Luna: {message}".strip()
+
+    def _project_memory_sections(self, project: object) -> dict[str, list[str]]:
+        buckets = {"execution": [], "handoff": [], "focus": [], "other": []}
+        for item in getattr(project, "memory_entries", [])[:16]:
+            normalized = item.lower()
+            if normalized.startswith(("agent action:", "agent failed:", "task updated:")):
+                buckets["execution"].append(item)
+            elif normalized.startswith(("agent handoff:", "agent next step:", "xeno model guidance:", "xeno refreshed")):
+                buckets["handoff"].append(item)
+            elif normalized.startswith(("chat focus:", "luna direction:")):
+                buckets["focus"].append(item)
+            else:
+                buckets["other"].append(item)
+        return buckets
+
+    def _guarded_action(self, category: str, title: str, callback: Callable[[], object]) -> str:
+        if self.pending_action is not None and self.pending_action[1] != title:
+            current_title = self.pending_action[1]
+            return f"Luna: Nejdriv prosim potvrd nebo zrus cekajici akci `{current_title}` a potom muzu pripravit dalsi."
         if not self._is_action_allowed(category):
-            detail = f"{title} is blocked by the current agent permissions."
-            self._log_action(category, title, "blocked", detail)
-            return f"Luna: {detail}"
+            result = self._coerce_action_result(
+                {
+                    "ok": False,
+                    "status": "blocked",
+                    "message": "Tuhle akci ted blokuji aktualni opravneni.",
+                    "detail": f"{title} is blocked by the current agent permissions.",
+                },
+                category=category,
+                title=title,
+            )
+            self._log_action(category, title, "blocked", str(result.get("detail", "")))
+            return self._format_action_result_for_chat(result)
         mode = self._action_mode()
         if mode == "block":
-            detail = f"{title} is blocked because agent execution mode is set to block."
-            self._log_action(category, title, "blocked", detail)
-            return f"Luna: {detail}"
+            result = self._coerce_action_result(
+                {
+                    "ok": False,
+                    "status": "blocked",
+                    "message": "Akce je blokovana, protoze system je v block rezimu.",
+                    "detail": f"{title} is blocked because agent execution mode is set to block.",
+                },
+                category=category,
+                title=title,
+            )
+            self._log_action(category, title, "blocked", str(result.get("detail", "")))
+            return self._format_action_result_for_chat(result)
         if mode == "ask":
             self.pending_action = (category, title, callback)
-            detail = f"Pending approval for {title}."
-            self._log_action(category, title, "pending", detail)
-            return "Luna: Mam akci pripravenou. Napis `potvrd akci`, pokud ji mam opravdu provest, nebo `zrus akci`, pokud ji mam zahodit."
+            self._log_action(category, title, "pending", f"Pending approval for {title}.")
+            return self._format_action_result_for_chat({"status": "pending", "message": "pending"}, pending=True)
         try:
-            message = callback()
+            result = self._coerce_action_result(callback(), category=category, title=title)
         except OSError as error:
-            detail = f"{title} failed: {error}"
-            self._log_action(category, title, "failed", detail)
-            return f"Luna: {detail}"
-        self._log_action(category, title, "completed", message)
-        return f"Luna: {message}"
+            result = self._coerce_action_result(
+                {
+                    "ok": False,
+                    "status": "failed",
+                    "message": "Akce selhala.",
+                    "detail": f"{title} failed: {error}",
+                },
+                category=category,
+                title=title,
+            )
+            self._log_action(category, title, "failed", str(result.get("detail", "")))
+            return self._format_action_result_for_chat(result)
+        self._log_action(category, title, str(result.get("status", "completed")), str(result.get("detail", result.get("message", ""))))
+        return self._format_action_result_for_chat(result)
 
     def has_pending_action(self) -> bool:
         return self.pending_action is not None
@@ -211,17 +374,35 @@ class LunaEngine:
         category, title, callback = self.pending_action
         self.pending_action = None
         if normalized in {"zrus akci", "cancel action"}:
-            detail = f"Cancelled {title}."
-            self._log_action(category, title, "cancelled", detail)
-            return f"Luna: {detail}"
+            result = self._coerce_action_result(
+                {
+                    "ok": False,
+                    "status": "cancelled",
+                    "message": "Akci jsem zrusila.",
+                    "detail": f"Cancelled {title}.",
+                },
+                category=category,
+                title=title,
+            )
+            self._log_action(category, title, "cancelled", str(result.get("detail", "")))
+            return self._format_action_result_for_chat(result)
         try:
-            message = callback()
+            result = self._coerce_action_result(callback(), category=category, title=title)
         except OSError as error:
-            detail = f"{title} failed: {error}"
-            self._log_action(category, title, "failed", detail)
-            return f"Luna: {detail}"
-        self._log_action(category, title, "completed", message)
-        return f"Luna: {message}"
+            result = self._coerce_action_result(
+                {
+                    "ok": False,
+                    "status": "failed",
+                    "message": "Akce se nepovedla.",
+                    "detail": f"{title} failed: {error}",
+                },
+                category=category,
+                title=title,
+            )
+            self._log_action(category, title, "failed", str(result.get("detail", "")))
+            return self._format_action_result_for_chat(result)
+        self._log_action(category, title, str(result.get("status", "completed")), str(result.get("detail", result.get("message", ""))))
+        return self._format_action_result_for_chat(result)
 
     def _resolve_local_target(self, raw_target: str) -> Path | None:
         target_text = raw_target.strip().strip('"').strip("'")
@@ -238,7 +419,7 @@ class LunaEngine:
     def _default_action_root(self) -> Path:
         current_project = self.projects.get_current_project()
         if current_project is not None:
-            return self.desktop_actions.ensure_project_workspace(str(current_project.get("name", "")))
+            return self.desktop_actions.ensure_project_workspace(current_project.name)
         return Path.cwd()
 
     def _resolve_creation_target(self, raw_target: str) -> Path:
@@ -254,7 +435,7 @@ class LunaEngine:
         roots: list[Path] = []
         current_project = self.projects.get_current_project()
         if current_project is not None:
-            roots.append(self.desktop_actions.ensure_project_workspace(str(current_project.get("name", ""))))
+            roots.append(self.desktop_actions.ensure_project_workspace(current_project.name))
         cwd = Path.cwd()
         if cwd not in roots:
             roots.append(cwd)
@@ -499,19 +680,19 @@ class LunaEngine:
                 return "Luna: Ted nemam aktivni projekt, takze nemam jaky workspace otevrit ve VS Code."
 
             def open_workspace_in_vscode() -> str:
-                result = self.open_connected_app("vscode", str(current_project.get("name", "")))
+                result = self.open_connected_app("vscode", current_project.name)
                 message = str(result.get("message", "")).strip()
                 if result.get("ok"):
                     return message
                 raise OSError(message or "VS Code jsem nemohla otevrit.")
 
-            return self._guarded_action("app_launch", f"open workspace in VS Code for {current_project.get('name', '')}", open_workspace_in_vscode)
+            return self._guarded_action("app_launch", f"open workspace in VS Code for {current_project.name}", open_workspace_in_vscode)
 
         if any(phrase in lowered for phrase in ["otevri projekt", "otev?i projekt", "open project", "otevri workspace", "otev?i workspace", "open workspace"]):
             current_project = self.projects.get_current_project()
             if current_project is None:
                 return "Luna: Ted nemam aktivni projekt, takze nemam jaky workspace otevrit."
-            workspace = self.desktop_actions.ensure_project_workspace(str(current_project.get("name", "")))
+            workspace = self.desktop_actions.ensure_project_workspace(current_project.name)
             return self._guarded_action("path_open", f"open workspace {workspace}", lambda: self.desktop_actions.open_path(workspace))
 
         return None
@@ -579,8 +760,13 @@ class LunaEngine:
                 status = task.get("status", "pending")
                 top_tasks.append(f"{title} [{status}]")
             lines.append("Tracked tasks: " + ", ".join(top_tasks))
-        if project.memory_entries:
-            lines.append("Recent project memory: " + " | ".join(project.memory_entries[:4]))
+        memory_sections = self._project_memory_sections(project)
+        if memory_sections["handoff"]:
+            lines.append("Recent handoff: " + " | ".join(memory_sections["handoff"][:2]))
+        if memory_sections["execution"]:
+            lines.append("Recent execution: " + " | ".join(memory_sections["execution"][:2]))
+        if memory_sections["focus"]:
+            lines.append("Recent conversation focus: " + " | ".join(memory_sections["focus"][:2]))
         if project.attachment_names:
             lines.append("Linked files: " + ", ".join(project.attachment_names[:6]))
         lines.append("If the user asks a vague follow-up and no new project is explicitly introduced, assume they still mean this active project.")
@@ -628,7 +814,9 @@ class LunaEngine:
         hidden_support: str = "",
         project_context: str = "",
         library_context: str = "",
+        intelligence_level: str | None = None,
     ) -> list[dict[str, str]]:
+        level = str(intelligence_level or self._normalized_intelligence_level()).strip()
         return self.prompt_builder.build(
             user_input=user_input,
             mode=mode,
@@ -639,6 +827,7 @@ class LunaEngine:
             hidden_support=hidden_support,
             project_context=project_context,
             library_context=library_context,
+            intelligence_level=level,
         )
 
     def build_messages(
@@ -652,6 +841,7 @@ class LunaEngine:
         hidden_support: str = "",
         project_context: str = "",
         library_context: str = "",
+        intelligence_level: str | None = None,
     ) -> list[dict[str, str]]:
         return self.build_prompt(
             user_input=user_input,
@@ -663,6 +853,7 @@ class LunaEngine:
             hidden_support=hidden_support,
             project_context=project_context,
             library_context=library_context,
+            intelligence_level=intelligence_level,
         )
 
     def chat(self, user_input: str) -> str:
@@ -700,6 +891,7 @@ class LunaEngine:
         hidden_support = self._hidden_xeno_support(workflow_data["user_input"])
         project_context = self._project_context()
         library_context = self._library_context(workflow_data["user_input"])
+        intelligence_level = self._normalized_intelligence_level()
         messages = self.build_messages(
             user_input=workflow_data["user_input"],
             mode=workflow_data["mode"],
@@ -710,6 +902,7 @@ class LunaEngine:
             hidden_support=hidden_support,
             project_context=project_context,
             library_context=library_context,
+            intelligence_level=intelligence_level,
         )
 
         response = self.model.generate(messages)
@@ -815,25 +1008,197 @@ class LunaEngine:
             self.projects.add_memory_entry(project_id, f"Task updated: {task_title} -> {status.replace('_', ' ')}")
         return self._serialize_project(self.projects.get_project(project_id))
 
-    def run_agent_task_action(self, project_id: str, task_title: str) -> dict[str, object]:
+    def _task_dependencies_satisfied(self, project: object, task: dict[str, str]) -> bool:
+        dependency_text = str(task.get("dependencies", "")).strip()
+        if not dependency_text:
+            return True
+        dependencies = [item.strip() for item in dependency_text.split("|") if item.strip()]
+        if not dependencies:
+            return True
+        status_by_title = {
+            str(item.get("title", "")).strip(): str(item.get("status", "pending")).strip().lower()
+            for item in getattr(project, "tasks", [])
+            if isinstance(item, dict)
+        }
+        return all(status_by_title.get(title, "pending") == "completed" for title in dependencies)
+
+    def _task_priority_score(self, task: dict[str, str]) -> tuple[int, int, int, str]:
+        status = str(task.get("status", "pending")).strip().lower()
+        has_hint = bool(str(task.get("action_hint", "")).strip())
+        risk = str(task.get("risk", "")).strip().lower()
+        tool = str(task.get("tool", "")).strip().lower()
+        status_rank = {"in_progress": 0, "pending": 1}.get(status, 2)
+        hint_rank = 0 if has_hint else 1
+        risk_rank = {"low": 0, "medium": 1, "high": 2}.get(risk, 1)
+        tool_rank = {
+            "builder": 0,
+            "planning": 1,
+            "execution": 2,
+            "review": 3,
+            "memory": 4,
+            "architecture": 5,
+            "safety": 6,
+            "reasoning": 7,
+        }.get(tool, 9)
+        return (status_rank, hint_rank, risk_rank + tool_rank, str(task.get("title", "")).lower())
+
+    def get_next_agent_task(self, project_id: str) -> dict[str, str] | None:
+        project = self.projects.get_project(project_id)
+        if project is None:
+            return None
+        ready: list[dict[str, str]] = []
+        blocked: list[dict[str, str]] = []
+        for task in project.tasks:
+            status = str(task.get("status", "pending")).strip().lower()
+            if status == "completed":
+                continue
+            if self._task_dependencies_satisfied(project, task):
+                ready.append(task)
+            else:
+                blocked.append(task)
+        if ready:
+            ready.sort(key=self._task_priority_score)
+            return ready[0]
+        if blocked:
+            blocked.sort(key=lambda item: str(item.get("title", "")).lower())
+            return blocked[0]
+        return None
+
+    def run_next_agent_task(self, project_id: str) -> dict[str, object]:
+        next_task = self.get_next_agent_task(project_id)
+        if next_task is None:
+            return {"ok": False, "message": "No next agent task is available for this project."}
+        return self.run_agent_task_action(project_id, next_task)
+
+    def run_next_agent_chain(self, project_id: str, max_steps: int = 3) -> dict[str, object]:
         project = self.projects.get_project(project_id)
         if project is None:
             return {"ok": False, "message": "Project could not be found."}
-        result = self.desktop_actions.run_task_action(
-            project_name=project.name,
-            brief=project.brief,
-            next_step=project.next_step,
-            task_title=task_title,
-            workspace_settings=self.user_settings.data,
+
+        preview_tasks: list[dict[str, object]] = []
+        for task in project.tasks:
+            status = str(task.get("status", "pending")).strip().lower()
+            if status == "completed":
+                continue
+            preview_tasks.append(task)
+            if len(preview_tasks) >= 4:
+                break
+
+        intelligence_level = self._normalized_intelligence_level()
+        agent_model_support = self.xeno.task_agent.build_model_execution_support(
+            objective=project.brief,
+            tasks=preview_tasks,
+            model_generate=self.model.generate,
+            intelligence_level=intelligence_level,
         )
-        self.projects.update_task_status(project_id, task_title, result.get("status", "completed"))
-        self.projects.add_memory_entry(project_id, result.get("message", "Task agent ran an action."))
-        self._log_action("file_change", f"task action: {task_title}", result.get("status", "completed"), result.get("message", "Task agent ran an action."))
-        updated = self.projects.get_project(project_id)
+
+        results: list[str] = []
+        executed = 0
+        last_project = project
+
+        for _ in range(max_steps):
+            next_task = self.get_next_agent_task(project_id)
+            if next_task is None:
+                break
+            result = self.run_agent_task_action(project_id, next_task)
+            if not result.get("ok"):
+                if results:
+                    updated = self.projects.get_project(project_id)
+                    message = "Chain stopped after partial progress. " + " ".join(results) + " " + str(result.get("message", ""))
+                    if agent_model_support:
+                        message += "\n\nAgent model guidance:\n" + agent_model_support
+                    return {
+                        "ok": True,
+                        "message": message.strip(),
+                        "project": self._serialize_project(updated),
+                    }
+                message = str(result.get("message", "")).strip()
+                if agent_model_support:
+                    message = (message + "\n\nAgent model guidance:\n" + agent_model_support).strip()
+                return {
+                    "ok": False,
+                    "message": message,
+                    "project": self._serialize_project(self.projects.get_project(project_id)),
+                }
+
+            executed += 1
+            message = str(result.get("message", "")).strip()
+            if message:
+                results.append(message)
+            last_project = self.projects.get_project(project_id) or last_project
+            if str(next_task.get("status", "")).strip().lower() == "in_progress":
+                break
+            if str(next_task.get("action_hint", "")).strip().lower() == "open_workspace_in_tool":
+                break
+            if "opened" in message.lower() or "workspace" in message.lower():
+                break
+
+        if executed == 0:
+            return {"ok": False, "message": "No next agent chain could be executed."}
+
+        updated = self.projects.get_project(project_id) or last_project
+        summary = f"Agent chain executed {executed} step{'s' if executed != 1 else ''}."
+        detail = " ".join(results)
+        final_message = f"{summary} {detail}".strip()
+        self.projects.add_memory_entry(project_id, summary)
+        if agent_model_support:
+            self.projects.add_memory_entry(project_id, f"Agent model guidance: {agent_model_support[:220]}")
+            final_message += "\n\nAgent model guidance:\n" + agent_model_support
         return {
             "ok": True,
-            "message": result.get("message", "Task agent ran an action."),
-            "workspace": result.get("workspace", ""),
+            "message": final_message,
+            "project": self._serialize_project(updated),
+        }
+
+    def run_agent_task_action(self, project_id: str, task_payload: dict[str, object] | str) -> dict[str, object]:
+        project = self.projects.get_project(project_id)
+        if project is None:
+            return {"ok": False, "message": "Project could not be found."}
+
+        if isinstance(task_payload, dict):
+            task_data = task_payload
+            task_title = str(task_payload.get("title", "Task"))
+        else:
+            task_title = str(task_payload)
+            task_data = {"title": task_title}
+
+        try:
+            result = self.desktop_actions.run_task_action(
+                project_name=project.name,
+                brief=project.brief,
+                next_step=project.next_step,
+                task=task_data,
+                workspace_settings=self.user_settings.data,
+            )
+        except OSError as error:
+            detail = f"Task action failed: {error}"
+            self.projects.add_memory_entry(project_id, f"Agent failed: {task_title} -> {detail}")
+            self._log_action("file_change", f"task action: {task_title}", "failed", detail)
+            return {"ok": False, "message": detail}
+
+        action_result = self._coerce_action_result(
+            result,
+            category=str(result.get("category", "file_change")),
+            title=f"task action: {task_title}",
+        )
+        status = str(action_result.get("status", "completed"))
+        detail = str(action_result.get("detail", action_result.get("message", ""))).strip()
+        category = str(action_result.get("category", "file_change"))
+        is_ok = bool(action_result.get("ok", False))
+
+        self.projects.update_task_status(project_id, task_title, status)
+        if is_ok:
+            self.projects.add_memory_entry(project_id, f"Agent action: {task_title} -> {detail or action_result.get('message', '')}")
+        else:
+            self.projects.add_memory_entry(project_id, f"Agent failed: {task_title} -> {detail or action_result.get('message', '')}")
+        self._log_action(category, f"task action: {task_title}", status, detail or str(action_result.get("message", "")))
+        updated = self.projects.get_project(project_id)
+        return {
+            "ok": is_ok,
+            "message": str(action_result.get("message", "Task agent ran an action.")),
+            "detail": detail,
+            "status": status,
+            "workspace": action_result.get("workspace", ""),
             "project": self._serialize_project(updated),
         }
 
@@ -884,10 +1249,24 @@ class LunaEngine:
         return "\n\n".join(parts)
 
     def generate_project_package(self, user_input: str, project_name: str = "") -> dict[str, object]:
-        result = self.xeno.project_builder.build_from_request(user_input)
-        blueprint_text = self.xeno.handle(user_input)
-        tasks = [{"title": step.title, "status": step.status, "description": step.description} for step in (result.agent_run.steps if result.agent_run else [])]
+        intelligence_level = self._normalized_intelligence_level()
+        result = self.xeno.project_builder.build_from_request(user_input, intelligence_level=intelligence_level)
+        blueprint_text = self.xeno.handle(user_input, intelligence_level=intelligence_level, model_generate=self.model.generate)
+        tasks = [
+            {
+                "title": step.title,
+                "status": step.status,
+                "description": step.description,
+                "tool": step.tool,
+                "risk": step.risk,
+                "action_hint": step.action_hint,
+                "handoff_note": step.handoff_note,
+                "dependencies": " | ".join(step.dependencies),
+            }
+            for step in (result.agent_run.steps if result.agent_run else [])
+        ]
         handoff_summary = result.agent_run.handoff_summary if result.agent_run is not None else ""
+        xeno_model_support = self.xeno.build_model_support(user_input, self.model.generate, intelligence_level=intelligence_level)
         resolved_name = project_name.strip() or result.blueprint.project_name
         current = self.projects.get_current_project()
         if current is None:
@@ -902,11 +1281,14 @@ class LunaEngine:
             next_step=result.next_step,
             current_phase=result.agent_run.current_phase if result.agent_run else "planning",
             tasks=tasks,
+            handoff_summary=handoff_summary,
         )
         self.projects.add_memory_entry(record.id, f"Xeno refreshed the project plan for {resolved_name}.")
         self.projects.add_memory_entry(record.id, f"Agent next step: {result.next_step}")
         if handoff_summary:
             self.projects.add_memory_entry(record.id, f"Agent handoff: {handoff_summary}")
+        if xeno_model_support:
+            self.projects.add_memory_entry(record.id, f"Xeno model guidance: {xeno_model_support[:220]}")
         project_id = updated.id if updated is not None else record.id
         return {
             "project_id": project_id,
@@ -916,7 +1298,7 @@ class LunaEngine:
             "next_step": result.next_step,
             "current_phase": result.agent_run.current_phase if result.agent_run else "planning",
             "tasks": tasks,
-            "xeno_note": f"Xeno prepared a new execution track for {resolved_name}. {handoff_summary}",
+            "xeno_note": f"Xeno prepared a new execution track for {resolved_name}. {handoff_summary}" + (f"\n\nXeno model guidance:\n{xeno_model_support}" if xeno_model_support else ""),
         }
 
     def generate_project_blueprint(self, user_input: str) -> str:
@@ -941,6 +1323,21 @@ class LunaEngine:
             print(response)
             if user_input.lower() == "exit":
                 break
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 

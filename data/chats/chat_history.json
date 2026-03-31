@@ -32,7 +32,7 @@
       },
       {
         "role": "user",
-        "content": "Ano muzes otevrit Vscode ??"
+        "content": "Ano muzes otevrit Vscode ?"
       },
       {
         "role": "assistant",
@@ -431,6 +431,70 @@
       {
         "role": "assistant",
         "content": "Luna: Opened Blender."
+      },
+      {
+        "role": "user",
+        "content": "Ahoj jak se mas"
+      },
+      {
+        "role": "assistant",
+        "content": "Luna: LM Studio is not reachable. Make sure the LM Studio server is running and reachable at http://127.0.0.1:1234/api/v1/chat. Details: <urlopen error [WinError 10061] Nemohlo být vytvořeno žádné připojení, protože cílový počítač je aktivně odmítl>"
+      },
+      {
+        "role": "user",
+        "content": "ahoj"
+      },
+      {
+        "role": "assistant",
+        "content": "Luna: LM Studio is not reachable. Make sure the LM Studio server is running and reachable at http://127.0.0.1:1234/api/v1/chat. Details: <urlopen error [WinError 10061] Nemohlo být vytvořeno žádné připojení, protože cílový počítač je aktivně odmítl>"
+      },
+      {
+        "role": "user",
+        "content": "ahoj"
+      },
+      {
+        "role": "assistant",
+        "content": "Luna: LM Studio is not reachable. Make sure the LM Studio server is running and reachable at http://192.168.31.23:1234/api/v1/chat. Details: <urlopen error [WinError 10060] Pokus o připojení selhal, protože připojená strana v časovém intervalu řádně neodpověděla, nebo vytvořené připojení selhalo, protože neodpověděl připojený hostitel>"
+      },
+      {
+        "role": "user",
+        "content": "co umis na pc"
+      },
+      {
+        "role": "assistant",
+        "content": "Luna: LM Studio is not reachable. Make sure the LM Studio server is running and reachable at http://192.168.31.23:1234/api/v1/chat. Details: <urlopen error [WinError 10013] Došlo k pokusu o přístup k soketu způsobem zakázaným jeho přístupovými oprávněními>"
+      },
+      {
+        "role": "user",
+        "content": "vytvor slozku demo-foundation"
+      },
+      {
+        "role": "assistant",
+        "content": "Luna: Mam akci pripravenou. Napis `potvrd akci`, pokud ji mam opravdu provest, nebo `zrus akci`, pokud ji mam zahodit."
+      },
+      {
+        "role": "user",
+        "content": "otevri vscode"
+      },
+      {
+        "role": "assistant",
+        "content": "Luna: Mam akci pripravenou. Napis `potvrd akci`, pokud ji mam opravdu provest, nebo `zrus akci`, pokud ji mam zahodit."
+      },
+      {
+        "role": "user",
+        "content": "vytvor slozku demo-foundation"
+      },
+      {
+        "role": "assistant",
+        "content": "Luna: Mam akci pripravenou. Napis `potvrd akci`, pokud ji mam opravdu provest, nebo `zrus akci`, pokud ji mam zahodit."
+      },
+      {
+        "role": "user",
+        "content": "otevri vscode"
+      },
+      {
+        "role": "assistant",
+        "content": "Luna: Nejdriv prosim potvrď nebo zrus cekajici akci `create folder D:\\LunaAI\\data\\projects\\workspaces\\local-note-app\\demo-foundation` a potom muzu pripravit dalsi."
       }
     ]
   }

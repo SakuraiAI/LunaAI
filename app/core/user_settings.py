@@ -1,4 +1,4 @@
-from dataclasses import asdict, dataclass
+﻿from dataclasses import asdict, dataclass
 import json
 from pathlib import Path
 
@@ -21,6 +21,8 @@ class UserWorkspaceSettings:
     google_email: str = ""
     profile_display_name: str = ""
     profile_image_path: str = ""
+    system_control_profile: str = "assist"
+    intelligence_level: str = "4"
     agent_execution_mode: str = "ask"
     allow_app_launch: bool = True
     allow_path_open: bool = True

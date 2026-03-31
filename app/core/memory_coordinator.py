@@ -2,6 +2,7 @@
 
 from app.memory.chat_memory import ChatMemory
 from app.memory.long_memory import LongMemory
+from app.core.text_utils import repair_text
 
 
 class ChatMemoryLike(Protocol):
@@ -32,8 +33,8 @@ class MemoryCoordinator:
         self.long_memory.remember_lesson(user_input, selected_mode)
 
     def save_exchange(self, user_input: str, response: str) -> None:
-        self.chat_memory.save_message("user", user_input)
-        self.chat_memory.save_message("assistant", response)
+        self.chat_memory.save_message("user", repair_text(user_input))
+        self.chat_memory.save_message("assistant", repair_text(response))
         self.message_counter += 1
         self.review_if_needed()
 

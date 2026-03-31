@@ -15,8 +15,14 @@
   "google_email": "filip.bukovsky27@gmail.com",
   "profile_display_name": "Sakurai Haise",
   "profile_image_path": "C:/Users/sakur/Pictures/IMG_1589.png",
+  "system_control_profile": "assist",
   "agent_execution_mode": "ask",
   "allow_app_launch": true,
   "allow_path_open": true,
-  "allow_file_changes": true
+  "allow_file_changes": true,
+  "cloud_enabled": false,
+  "cloud_provider": "local_folder",
+  "cloud_root_path": "",
+  "cloud_account_email": "",
+  "cloud_auto_sync": false
 }

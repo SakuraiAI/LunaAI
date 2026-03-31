@@ -1,8 +1,11 @@
+from typing import Callable
+
 from app.xeno.models import AgentRun, AgentStep, ProjectBlueprint
 
 
 class TaskAgent:
-    def create_run(self, blueprint: ProjectBlueprint) -> AgentRun:
+    def create_run(self, blueprint: ProjectBlueprint, intelligence_level: str = "4") -> AgentRun:
+        level = str(intelligence_level).strip()
         steps = [
             AgentStep(
                 title="Lock the first milestone",
@@ -56,14 +59,68 @@ class TaskAgent:
             ),
         ]
 
+        if level == "5":
+            steps.insert(
+                2,
+                AgentStep(
+                    title="Lock trust and safety boundaries",
+                    description="Verify which actions should be confirmed, logged, or delayed before deeper execution.",
+                    tool="safety",
+                    risk="medium",
+                    dependencies=["Lock the first milestone"],
+                    action_ready=True,
+                    action_hint="create_execution_plan",
+                    handoff_note="Agent can lock the trust layer into the execution notes before continuing.",
+                ),
+            )
+            steps.insert(
+                3,
+                AgentStep(
+                    title="Shape the architecture handoff",
+                    description="Make the system layers and agent boundaries explicit before the first big execution pass.",
+                    tool="architecture",
+                    risk="medium",
+                    dependencies=["Lock the first milestone", "Map the execution path"],
+                    action_ready=True,
+                    action_hint="create_execution_plan",
+                    handoff_note="Agent can capture the architecture handoff so Luna, Xeno, memory, and agents stay aligned.",
+                )
+            )
+            steps.append(
+                AgentStep(
+                    title="Capture project memory and handoff state",
+                    description="Store the critical decisions, risks, and next operational handoff for Luna and future runs.",
+                    tool="memory",
+                    risk="low",
+                    dependencies=["Review quality and next step"],
+                    action_ready=True,
+                    action_hint="refresh_review_notes",
+                    handoff_note="Agent can refresh memory-facing notes and preserve the latest handoff summary.",
+                )
+            )
+        elif level == "3":
+            steps = steps[:4]
+
         handoff_summary = self.create_handoff_summary_from_steps(steps)
+        execution_mode = "guided"
+        if blueprint.difficulty == "high" or level == "5":
+            execution_mode = "strategic"
+        elif blueprint.difficulty != "high":
+            execution_mode = "accelerated"
+
+        recommended_next_action = "Prepare the workspace and ship the smallest working milestone."
+        if level == "5":
+            recommended_next_action = "Lock the trust layer, prepare the workspace, and ship the smallest working milestone with clean handoff notes."
+        elif level == "3":
+            recommended_next_action = "Prepare the workspace and move quickly to the first usable result."
+
         return AgentRun(
             name=f"{blueprint.project_name} Agent",
             objective=blueprint.goal,
             current_phase="execution_design",
             steps=steps,
-            execution_mode="guided" if blueprint.difficulty == "high" else "accelerated",
-            recommended_next_action="Prepare the workspace and ship the smallest working milestone.",
+            execution_mode=execution_mode,
+            recommended_next_action=recommended_next_action,
             handoff_summary=handoff_summary,
         )
 
@@ -134,37 +191,104 @@ class TaskAgent:
             "It turns action-heavy requests into concrete steps and acts like Luna's hands, eyes, and working layer."
         )
 
-    def create_action_support(self, user_input: str) -> str:
+    def create_action_support(self, user_input: str, intelligence_level: str = "4") -> str:
         normalized = user_input.strip().lower()
+        level = str(intelligence_level).strip()
 
         if any(signal in normalized for signal in ["chrome", "browser", "prohlizec"]):
-            return (
+            base = (
                 "Hidden task agent support: browser action requested. "
                 "Prepare navigation steps, verify the target page, and report only real completed actions."
             )
+            if level == "5":
+                base += " Preserve the concrete destination and avoid vague browsing."
+            return base
 
         if any(signal in normalized for signal in ["find page", "find website", "najdi stranku", "vyhledej", "search for"]):
-            return (
+            base = (
                 "Hidden task agent support: research-navigation task requested. "
                 "Break it into search, relevance check, and next concrete move."
             )
+            if level == "5":
+                base += " Keep the chain short and evidence-aware."
+            return base
 
         if any(signal in normalized for signal in ["soubor", "file", "projekt", "project", "workspace", "vscode", "folder", "slozku", "slo?ku"]):
-            return (
+            base = (
                 "Hidden task agent support: local build or file-system action requested. "
                 "Prefer verified execution, track the next step, and keep the response tied to what truly happened on disk."
             )
+            if level == "5":
+                base += " Preserve exact handoff notes for the next action."
+            return base
 
         if any(signal in normalized for signal in ["implement", "workflow", "automation", "agent"]):
-            return (
+            base = (
                 "Hidden task agent support: multi-step execution requested. "
                 "Convert the goal into a short run, identify dependencies, and prefer one finished slice over many partial steps."
             )
+            if level == "5":
+                base += " Keep trust, permissions, and reversibility visible in the plan."
+            return base
 
         return (
             "Hidden task agent support: execution-oriented request detected. "
             "Use a step-based plan, protect local actions with permissions, and prioritize concrete progress over abstract explanation."
         )
+
+    def build_model_execution_support(
+        self,
+        objective: str,
+        tasks: list[dict[str, object]],
+        model_generate: Callable[[list[dict[str, str]]], str] | None,
+        intelligence_level: str = "4",
+    ) -> str:
+        if model_generate is None:
+            return ""
+        level = str(intelligence_level).strip()
+        if level not in {"4", "5"}:
+            return ""
+        if not tasks:
+            return ""
+
+        task_lines: list[str] = []
+        for task in tasks[:4]:
+            title = str(task.get("title", "Task")).strip()
+            status = str(task.get("status", "pending")).strip()
+            tool = str(task.get("tool", "")).strip()
+            hint = str(task.get("action_hint", "")).strip()
+            task_lines.append(f"- {title} [{status}] tool={tool or 'n/a'} hint={hint or 'n/a'}")
+
+        messages = [
+            {
+                "role": "system",
+                "content": (
+                    "You are the task agent's hidden execution strategist. "
+                    "Return only short internal notes with 3 lines: Chain read, Best safe step, Stop condition. "
+                    "Do not greet. Do not roleplay. Keep it tightly operational and permission-aware."
+                ),
+            },
+            {
+                "role": "user",
+                "content": (
+                    f"Intelligence level: {level}\n"
+                    f"Objective: {objective}\n"
+                    "Upcoming tasks:\n" + "\n".join(task_lines)
+                ),
+            },
+        ]
+        try:
+            result = str(model_generate(messages) or "").strip()
+        except Exception:
+            return ""
+        if result.startswith("Luna:"):
+            result = result.removeprefix("Luna:").strip()
+        if result.startswith("Task agent:"):
+            result = result.removeprefix("Task agent:").strip()
+        lowered = result.lower()
+        if not result or lowered.startswith("lm studio") or lowered.startswith("unexpected"):
+            return ""
+        return result
 
     def format_run(self, run: AgentRun) -> str:
         lines = [
