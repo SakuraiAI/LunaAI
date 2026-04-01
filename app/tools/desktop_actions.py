@@ -58,6 +58,7 @@ class DesktopActionTool:
         "create_project_scaffold": {"category": "file_change", "label": "Create project scaffold"},
         "open_workspace_in_tool": {"category": "app_launch", "label": "Open workspace in tool"},
         "refresh_review_notes": {"category": "file_change", "label": "Refresh review notes"},
+        "observe_desktop_state": {"category": "observe", "label": "Observe desktop state"},
     }
 
     def __init__(self, workspace_root: Path | None = None) -> None:

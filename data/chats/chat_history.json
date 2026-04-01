@@ -277,6 +277,22 @@
       {
         "role": "assistant",
         "content": "Luna: Vytvořila jsem složku `chain-demo-2` a soubor `chain-demo-2\\notes.txt`.\n\nDále, našla jsem několik možností psychické pomoci v tvém okolí. Zde jsou některé z nich:\n\n*   **Linky na bezplatné online poradenství:** [https://www.linkypretes.cz/](https://www.linkypretes.cz/)\n*   **Telefonní čísla krizovek:** 116111 nebo 116123\n*   **Psychiatrická oddělení nemocnic:** Zkus se informovat na místních nemocnicích, často mají psychiatrické oddělení.\n\nPokud potřebuješ další pomoc s hledáním konkrétní psychologické poradny, dej mi vědět."
+      },
+      {
+        "role": "user",
+        "content": "zapni observe mode"
+      },
+      {
+        "role": "assistant",
+        "content": "Luna: Observe mode je aktivni. Budu brat desktop context jako dalsi vrstvu pri planovani i odpovedich."
+      },
+      {
+        "role": "user",
+        "content": "co se zmenilo na obrazovce"
+      },
+      {
+        "role": "assistant",
+        "content": "Luna desktop observation:\nActive window: Grioten, xlout - ADRENALINA // SPEED UP | YouTube Music - Google Chrome\nApp: Web browser\nProcess: chrome.exe (PID 12528)\nMeaning: watching or browsing YouTube\nMouse position: 1848, 836\nScreen size: 2560x1440\nDetected context: youtube\nDesktop observation captured.\nThe desktop still looks stable. Luna did not detect a meaningful change since the last observation."
       }
     ],
     "a70b6c3162e1": [
@@ -495,6 +511,46 @@
       {
         "role": "assistant",
         "content": "Luna: Nejdriv prosim potvrď nebo zrus cekajici akci `create folder D:\\LunaAI\\data\\projects\\workspaces\\local-note-app\\demo-foundation` a potom muzu pripravit dalsi."
+      },
+      {
+        "role": "user",
+        "content": "co vidis na obrazovce"
+      },
+      {
+        "role": "assistant",
+        "content": "Luna desktop observation:\nActive window: ● main.py - LunaAI - Visual Studio Code\nProcess: Code.exe (PID 17324)\nMouse position: 2297, 1295\nScreen size: 2560x1440\nDesktop observation captured."
+      },
+      {
+        "role": "user",
+        "content": "co vidis na obrazovce"
+      },
+      {
+        "role": "assistant",
+        "content": "Luna desktop observation:\nActive window:  main.py - LunaAI - Visual Studio Code\nProcess: Code.exe (PID 17324)\nMouse position: 2297, 1295\nScreen size: 2560x1440\nDesktop observation captured."
+      },
+      {
+        "role": "user",
+        "content": "v jake appce jsem"
+      },
+      {
+        "role": "assistant",
+        "content": "Luna desktop observation:\nActive window: Problémy dnešní AI - Google Chrome\nApp: Web browser\nProcess: chrome.exe (PID 12528)\nMeaning: browsing the web\nMouse position: 5048, 1059\nScreen size: 2560x1440\nDesktop observation captured."
+      },
+      {
+        "role": "user",
+        "content": "co ted delam na pc"
+      },
+      {
+        "role": "assistant",
+        "content": "Luna desktop observation:\nActive window: Problémy dnešní AI - Google Chrome\nApp: Web browser\nProcess: chrome.exe (PID 12528)\nMeaning: browsing the web\nMouse position: 5048, 1059\nScreen size: 2560x1440\nDesktop observation captured."
+      },
+      {
+        "role": "user",
+        "content": "jak se mas"
+      },
+      {
+        "role": "assistant",
+        "content": "Luna: LM Studio is not reachable. Make sure the LM Studio server is running and reachable at http://192.168.31.23:1234/api/v1/chat. Details: <urlopen error [WinError 10060] Pokus o připojení selhal, protože připojená strana v časovém intervalu řádně neodpověděla, nebo vytvořené připojení selhalo, protože neodpověděl připojený hostitel>"
       }
     ]
   }

@@ -19,6 +19,7 @@ from app.memory.chat_memory import ChatMemory
 from app.memory.long_memory import LongMemory
 from app.models.local_model import LocalModel
 from app.tools.desktop_actions import DesktopActionTool
+from app.tools.desktop_observer import DesktopObserverTool
 from app.tools.internet import InternetTool
 from app.workflow.manager import WorkflowManager
 from app.xeno.coordinator import XenoCoordinator
@@ -41,6 +42,7 @@ class LunaEngine:
         self.workflow = WorkflowManager()
         self.internet = InternetTool()
         self.desktop_actions = DesktopActionTool()
+        self.desktop_observer = DesktopObserverTool()
         self.xeno = XenoCoordinator()
         self.user_settings = UserSettingsStore(Path(self.settings.user_settings_path))
         self.projects = ProjectStore(Path(self.settings.projects_path))
@@ -49,6 +51,8 @@ class LunaEngine:
         self.system_control = SystemControlLayer()
         self.system_control.apply_profile(self.user_settings.data, self.user_settings.data.system_control_profile)
         self.pending_action: tuple[str, str, Callable[[], str]] | None = None
+        self.observe_mode_enabled = False
+        self.last_desktop_observation: dict[str, object] | None = None
 
         try:
             timezone = ZoneInfo("Europe/Prague")
@@ -190,6 +194,10 @@ class LunaEngine:
             lines.append("Connected apps: none yet")
         lines.extend([
             "Local actions Luna can handle right now:",
+            "- observe the active desktop window and mouse position",
+            "- compare the current desktop with the previous observation",
+            "- keep an observe mode baseline for Luna and Xeno",
+            "- capture a screenshot when a backend is available",
             "- open connected apps and workspaces",
             "- open files and folders",
             "- create folders and files",
@@ -199,6 +207,125 @@ class LunaEngine:
             "Registered task actions: " + ", ".join(item["action_key"] for item in self.desktop_actions.list_registered_actions()),
         ])
         return "\n".join(lines)
+
+    def _remember_observation(self, observation: dict[str, object], *, source: str = "observe") -> None:
+        self.last_desktop_observation = observation
+        project = self.projects.get_current_project()
+        if project is None:
+            return
+        app_label = str(observation.get("app_label", "") or "Desktop app").strip()
+        activity = str(observation.get("inferred_activity", "") or "desktop activity").strip()
+        title = str(observation.get("active_window_title", "") or "").strip()
+        note = f"Desktop observe: {app_label} -> {activity}"
+        if title:
+            note += f" | {title[:120]}"
+        self.projects.add_memory_entry(project.id, note)
+
+    def _observer_context(self, *, refresh: bool = False) -> str:
+        if refresh or self.last_desktop_observation is None:
+            try:
+                observation = self.desktop_observer.observe(include_screenshot=False)
+            except Exception:
+                observation = None
+            if observation is not None:
+                self.last_desktop_observation = observation
+        observation = self.last_desktop_observation
+        if not observation:
+            return ""
+        lines = [
+            "Desktop observer context:",
+            f"Active window: {observation.get('active_window_title') or 'unknown'}",
+            f"App: {observation.get('app_label') or 'unknown'}",
+            f"Meaning: {observation.get('inferred_activity') or 'unknown activity'}",
+        ]
+        if observation.get("url_hint"):
+            lines.append(f"Detected context: {observation.get('url_hint')}")
+        return "\n".join(lines)
+
+    def observe_desktop(self, include_screenshot: bool = False, *, remember: bool = True) -> str:
+        observation = self.desktop_observer.observe(include_screenshot=include_screenshot)
+        summary = self.desktop_observer.summarize(observation)
+        title = "desktop screenshot" if include_screenshot else "desktop observe"
+        detail = str(observation.get("inferred_activity", "")).strip() or str(observation.get("detail", ""))
+        self._log_action("observe", title, "completed", detail)
+        if remember:
+            self._remember_observation(observation, source=title)
+        return summary
+
+    def diff_desktop_observation(self, include_screenshot: bool = False) -> str:
+        previous = self.last_desktop_observation
+        current = self.desktop_observer.observe(include_screenshot=include_screenshot)
+        diff = self.desktop_observer.diff(previous, current)
+        self.last_desktop_observation = current
+        self._log_action("observe", "desktop diff", "completed", str(diff.get("summary", "")))
+        if diff.get("changed"):
+            self._remember_observation(current, source="desktop diff")
+        lines = [self.desktop_observer.summarize(current), "", str(diff.get("summary", ""))]
+        return "\n".join(line for line in lines if line.strip())
+
+    def set_observe_mode(self, enabled: bool) -> str:
+        self.observe_mode_enabled = enabled
+        if enabled:
+            observation = self.desktop_observer.observe(include_screenshot=False)
+            self._remember_observation(observation, source="observe mode")
+            self._log_action("observe", "observe mode", "enabled", str(observation.get("inferred_activity", "")))
+            return "Luna: Observe mode je aktivni. Budu brat desktop context jako dalsi vrstvu pri planovani i odpovedich."
+        self._log_action("observe", "observe mode", "disabled", "Observe mode disabled.")
+        return "Luna: Observe mode jsem vypnula."
+
+    def _handle_observation_command(self, user_input: str) -> str | None:
+        normalized = " ".join(user_input.strip().lower().split())
+        screenshot_triggers = {
+            "zachyt obrazovku",
+            "vyfot obrazovku",
+            "udelaj screenshot",
+            "capture screen",
+            "take a screenshot",
+            "screenshot",
+        }
+        observe_triggers = {
+            "co vidis na obrazovce",
+            "co vidis na monitoru",
+            "pozoruj obrazovku",
+            "co mas pred sebou",
+            "v jake appce jsem",
+            "jaka appka je otevrena",
+            "co ted delam na pc",
+            "what is on the screen",
+            "what do you see on screen",
+            "observe desktop",
+            "what app is open",
+            "what am i doing on pc",
+        }
+        diff_triggers = {
+            "co se zmenilo na obrazovce",
+            "co se zmenilo na monitoru",
+            "what changed on screen",
+            "what changed on the screen",
+        }
+        enable_triggers = {
+            "zapni observe mode",
+            "zapni pozorovani obrazovky",
+            "start observe mode",
+            "enable observe mode",
+        }
+        disable_triggers = {
+            "vypni observe mode",
+            "vypni pozorovani obrazovky",
+            "stop observe mode",
+            "disable observe mode",
+        }
+        if normalized in screenshot_triggers:
+            return self.observe_desktop(include_screenshot=True)
+        if normalized in diff_triggers:
+            return self.diff_desktop_observation(include_screenshot=False)
+        if normalized in enable_triggers:
+            return self.set_observe_mode(True)
+        if normalized in disable_triggers:
+            return self.set_observe_mode(False)
+        if normalized in observe_triggers:
+            return self.observe_desktop(include_screenshot=False)
+        return None
 
     def _handle_local_capability_command(self, user_input: str) -> str | None:
         normalized = " ".join(user_input.strip().lower().split())
@@ -873,6 +1000,12 @@ class LunaEngine:
         if internet_result is not None:
             return internet_result
 
+        observation_result = self._handle_observation_command(cleaned_input)
+        if observation_result is not None:
+            self.memory_coordinator.remember_user_input(cleaned_input, "action")
+            self.memory_coordinator.save_exchange(cleaned_input, observation_result)
+            return observation_result
+
         local_action_result = self._try_local_action(cleaned_input)
         if local_action_result is not None:
             self.memory_coordinator.remember_user_input(cleaned_input, "action")
@@ -889,6 +1022,10 @@ class LunaEngine:
 
         internet_context = self._internet_context(workflow_data["user_input"])
         hidden_support = self._hidden_xeno_support(workflow_data["user_input"])
+        if self.observe_mode_enabled:
+            observer_context = self._observer_context(refresh=True)
+            if observer_context:
+                hidden_support = (hidden_support + "\n\n" + observer_context).strip() if hidden_support else observer_context
         project_context = self._project_context()
         library_context = self._library_context(workflow_data["user_input"])
         intelligence_level = self._normalized_intelligence_level()
@@ -1035,10 +1172,11 @@ class LunaEngine:
             "planning": 1,
             "execution": 2,
             "review": 3,
-            "memory": 4,
-            "architecture": 5,
-            "safety": 6,
-            "reasoning": 7,
+            "observation": 4,
+            "memory": 5,
+            "architecture": 6,
+            "safety": 7,
+            "reasoning": 8,
         }.get(tool, 9)
         return (status_rank, hint_rank, risk_rank + tool_rank, str(task.get("title", "")).lower())
 
@@ -1162,19 +1300,34 @@ class LunaEngine:
             task_title = str(task_payload)
             task_data = {"title": task_title}
 
-        try:
-            result = self.desktop_actions.run_task_action(
-                project_name=project.name,
-                brief=project.brief,
-                next_step=project.next_step,
-                task=task_data,
-                workspace_settings=self.user_settings.data,
-            )
-        except OSError as error:
-            detail = f"Task action failed: {error}"
-            self.projects.add_memory_entry(project_id, f"Agent failed: {task_title} -> {detail}")
-            self._log_action("file_change", f"task action: {task_title}", "failed", detail)
-            return {"ok": False, "message": detail}
+        action_hint = str(task_data.get("action_hint", "")).strip().lower()
+        if action_hint == "observe_desktop_state":
+            observation = self.desktop_observer.observe(include_screenshot=False)
+            summary = self.desktop_observer.summarize(observation)
+            result = {
+                "ok": True,
+                "status": "completed",
+                "message": str(task_data.get("handoff_note", "")).strip() or "Agent observed the active desktop state.",
+                "detail": summary,
+                "category": "observe",
+                "action_key": "observe_desktop_state",
+                "workspace": str(self.desktop_actions.ensure_project_workspace(project.name)),
+            }
+            self._remember_observation(observation, source="agent observe")
+        else:
+            try:
+                result = self.desktop_actions.run_task_action(
+                    project_name=project.name,
+                    brief=project.brief,
+                    next_step=project.next_step,
+                    task=task_data,
+                    workspace_settings=self.user_settings.data,
+                )
+            except OSError as error:
+                detail = f"Task action failed: {error}"
+                self.projects.add_memory_entry(project_id, f"Agent failed: {task_title} -> {detail}")
+                self._log_action("file_change", f"task action: {task_title}", "failed", detail)
+                return {"ok": False, "message": detail}
 
         action_result = self._coerce_action_result(
             result,

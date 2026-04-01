@@ -3,9 +3,10 @@
     "profile": [],
     "preferences": [],
     "goals": [],
-    "facts": [],
+    "facts": [
+      "pc"
+    ],
     "topics": [
-      "podivej se github a posli mi odkaz",
       "nechci toto ale jenom stranku",
       "potrebuji jenom strabku gym beam",
       "mam problem z kamaradem najdi mi prosim psycharnu",
@@ -16,7 +17,8 @@
       "blender prosim otevri",
       "Ahoj jak se mas",
       "ahoj",
-      "co umis na pc"
+      "co umis na pc",
+      "jak se mas"
     ]
   },
   "reviewed_messages": 94
