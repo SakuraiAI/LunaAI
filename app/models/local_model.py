@@ -22,6 +22,9 @@ class LocalModel(BaseModel):
         self.url = base_url
         self.api_token = api_token
         self.timeout_seconds = timeout_seconds
+        self.runtime_cpu_limit_percent = 100
+        self.runtime_gpu_limit_percent = 100
+        self.runtime_memory_limit_percent = 100
 
     def _extract_output_text(self, data: dict) -> str:
         output = data.get("output", "")
@@ -62,6 +65,30 @@ class LocalModel(BaseModel):
 
         return clean_model_response_text(cleaned)
 
+    def configure_runtime_limits(
+        self,
+        cpu_limit_percent: int = 100,
+        gpu_limit_percent: int = 100,
+        memory_limit_percent: int = 100,
+    ) -> None:
+        self.runtime_cpu_limit_percent = max(10, min(100, int(cpu_limit_percent)))
+        self.runtime_gpu_limit_percent = max(10, min(100, int(gpu_limit_percent)))
+        self.runtime_memory_limit_percent = max(10, min(100, int(memory_limit_percent)))
+
+    def _runtime_output_budget(self) -> int:
+        headroom = min(
+            self.runtime_cpu_limit_percent,
+            self.runtime_gpu_limit_percent,
+            self.runtime_memory_limit_percent,
+        )
+        if headroom <= 35:
+            return 320
+        if headroom <= 50:
+            return 480
+        if headroom <= 70:
+            return 720
+        return 960
+
     def generate(self, prompt: str | list[dict[str, str]]) -> str:
         system_prompt = "You are Luna."
         input_text = prompt if isinstance(prompt, str) else ""
@@ -84,6 +111,7 @@ class LocalModel(BaseModel):
             "system_prompt": system_prompt,
             "input": input_text,
             "temperature": 0.1,
+            "max_tokens": self._runtime_output_budget(),
         }
 
         headers = {"Content-Type": "application/json"}

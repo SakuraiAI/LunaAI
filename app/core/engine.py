@@ -77,6 +77,7 @@ class LunaEngine:
             settings=self.settings,
             internet=self.internet,
         )
+        self._apply_runtime_limits()
 
     def _serialize_project(self, record: object) -> dict[str, object] | None:
         if record is None:
@@ -98,6 +99,61 @@ class LunaEngine:
     def _normalized_intelligence_level(self) -> str:
         level = str(getattr(self.user_settings.data, "intelligence_level", "4") or "4").strip()
         return level if level in {"3", "4", "5"} else "4"
+
+
+    def _clamp_percent(self, value: object, fallback: int) -> int:
+        try:
+            parsed = int(value)
+        except (TypeError, ValueError):
+            parsed = int(fallback)
+        return max(10, min(100, parsed))
+
+    def _runtime_limits(self) -> dict[str, int]:
+        workspace = self.user_settings.data
+        return {
+            "cpu": self._clamp_percent(getattr(workspace, "cpu_limit_percent", 55), 55),
+            "gpu": self._clamp_percent(getattr(workspace, "gpu_limit_percent", 60), 60),
+            "memory": self._clamp_percent(getattr(workspace, "memory_limit_percent", 50), 50),
+        }
+
+    def _runtime_budget_profile(self) -> dict[str, object]:
+        limits = self._runtime_limits()
+        headroom = min(limits["cpu"], limits["gpu"], limits["memory"])
+        profile = "balanced"
+        if headroom <= 35:
+            profile = "constrained"
+        elif headroom <= 55:
+            profile = "guarded"
+        elif headroom >= 80:
+            profile = "expanded"
+        return {
+            "limits": limits,
+            "headroom": headroom,
+            "profile": profile,
+            "xeno_model_support": headroom > 40,
+            "observer_live_refresh": headroom > 45,
+            "agent_chain_steps": 1 if headroom <= 35 else 2 if headroom <= 60 else 3,
+        }
+
+    def _apply_runtime_limits(self) -> None:
+        limits = self._runtime_limits()
+        self.model.configure_runtime_limits(
+            cpu_limit_percent=limits["cpu"],
+            gpu_limit_percent=limits["gpu"],
+            memory_limit_percent=limits["memory"],
+        )
+
+    def _reload_runtime_preferences(self) -> None:
+        self.user_settings.load()
+        self.system_control.apply_profile(self.user_settings.data, self.user_settings.data.system_control_profile)
+        self._apply_runtime_limits()
+
+    def _observer_refresh_enabled(self) -> bool:
+        return bool(self._runtime_budget_profile()["observer_live_refresh"])
+
+    def _agent_chain_budget(self, requested_steps: int) -> int:
+        budget = int(self._runtime_budget_profile()["agent_chain_steps"])
+        return max(1, min(int(requested_steps), budget))
 
     def _handle_internet_command(self, user_input: str) -> str | None:
         command = user_input.strip().lower()
@@ -135,10 +191,12 @@ class LunaEngine:
         if not self.xeno.should_consult(user_input):
             return ""
         level = self._normalized_intelligence_level()
+        profile = self._runtime_budget_profile()
         parts = [self.xeno.build_hidden_support(user_input, intelligence_level=level)]
-        model_support = self.xeno.build_model_support(user_input, self.model.generate, intelligence_level=level)
-        if model_support:
-            parts.append("Hidden Xeno model guidance:\n" + model_support)
+        if bool(profile["xeno_model_support"]):
+            model_support = self.xeno.build_model_support(user_input, self.model.generate, intelligence_level=level)
+            if model_support:
+                parts.append("Hidden Xeno model guidance:\n" + model_support)
         return "\n".join(part for part in parts if part.strip())
 
     def _action_mode(self) -> str:
@@ -179,10 +237,14 @@ class LunaEngine:
 
     def describe_local_capabilities(self) -> str:
         workspace = self.user_settings.data
+        runtime = self._runtime_budget_profile()
+        limits = runtime["limits"]
         lines = [
             "Luna local control overview:",
             f"System control profile: {workspace.system_control_profile}",
             f"Agent execution mode: {workspace.agent_execution_mode}",
+            f"Runtime profile: {runtime['profile']}",
+            f"Runtime limits -> CPU {limits['cpu']}% | GPU {limits['gpu']}% | Memory {limits['memory']}%",
             f"App launch: {'enabled' if workspace.allow_app_launch else 'blocked'}",
             f"Path open: {'enabled' if workspace.allow_path_open else 'blocked'}",
             f"File changes: {'enabled' if workspace.allow_file_changes else 'blocked'}",
@@ -243,6 +305,7 @@ class LunaEngine:
         return "\n".join(lines)
 
     def observe_desktop(self, include_screenshot: bool = False, *, remember: bool = True) -> str:
+        self._reload_runtime_preferences()
         observation = self.desktop_observer.observe(include_screenshot=include_screenshot)
         summary = self.desktop_observer.summarize(observation)
         title = "desktop screenshot" if include_screenshot else "desktop observe"
@@ -253,6 +316,7 @@ class LunaEngine:
         return summary
 
     def diff_desktop_observation(self, include_screenshot: bool = False) -> str:
+        self._reload_runtime_preferences()
         previous = self.last_desktop_observation
         current = self.desktop_observer.observe(include_screenshot=include_screenshot)
         diff = self.desktop_observer.diff(previous, current)
@@ -264,6 +328,7 @@ class LunaEngine:
         return "\n".join(line for line in lines if line.strip())
 
     def set_observe_mode(self, enabled: bool) -> str:
+        self._reload_runtime_preferences()
         self.observe_mode_enabled = enabled
         if enabled:
             observation = self.desktop_observer.observe(include_screenshot=False)
@@ -984,6 +1049,7 @@ class LunaEngine:
         )
 
     def chat(self, user_input: str) -> str:
+        self._reload_runtime_preferences()
         cleaned_input = user_input.strip()
         if not cleaned_input:
             return ""
@@ -1023,7 +1089,7 @@ class LunaEngine:
         internet_context = self._internet_context(workflow_data["user_input"])
         hidden_support = self._hidden_xeno_support(workflow_data["user_input"])
         if self.observe_mode_enabled:
-            observer_context = self._observer_context(refresh=True)
+            observer_context = self._observer_context(refresh=self._observer_refresh_enabled())
             if observer_context:
                 hidden_support = (hidden_support + "\n\n" + observer_context).strip() if hidden_support else observer_context
         project_context = self._project_context()
@@ -1209,6 +1275,8 @@ class LunaEngine:
         return self.run_agent_task_action(project_id, next_task)
 
     def run_next_agent_chain(self, project_id: str, max_steps: int = 3) -> dict[str, object]:
+        self._reload_runtime_preferences()
+        max_steps = self._agent_chain_budget(max_steps)
         project = self.projects.get_project(project_id)
         if project is None:
             return {"ok": False, "message": "Project could not be found."}
@@ -1223,12 +1291,14 @@ class LunaEngine:
                 break
 
         intelligence_level = self._normalized_intelligence_level()
-        agent_model_support = self.xeno.task_agent.build_model_execution_support(
-            objective=project.brief,
-            tasks=preview_tasks,
-            model_generate=self.model.generate,
-            intelligence_level=intelligence_level,
-        )
+        agent_model_support = ""
+        if bool(self._runtime_budget_profile()["xeno_model_support"]):
+            agent_model_support = self.xeno.task_agent.build_model_execution_support(
+                objective=project.brief,
+                tasks=preview_tasks,
+                model_generate=self.model.generate,
+                intelligence_level=intelligence_level,
+            )
 
         results: list[str] = []
         executed = 0

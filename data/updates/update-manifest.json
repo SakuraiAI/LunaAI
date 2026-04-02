@@ -1,0 +1,34 @@
+{
+  "channel": "stable",
+  "latestVersion": "0.1.1",
+  "publishedAt": "2026-04-02",
+  "downloadUrl": "",
+  "entries": [
+    {
+      "id": "release-0-1-1",
+      "title": "Updater Foundation",
+      "detail": "LunaAI now has a real desktop update layer with version checks and download-ready release wiring.",
+      "status": "New",
+      "version": "0.1.1",
+      "date": "April 2, 2026",
+      "notes": [
+        "Electron can now compare the installed LunaAI version with a published update manifest.",
+        "The Updates page is ready to surface a new release and offer a download action.",
+        "Download links can be connected later without rebuilding the whole update UI."
+      ]
+    },
+    {
+      "id": "release-0-1-0",
+      "title": "System Upgrade Pass",
+      "detail": "Trust layer, action registry, and memory quality were hardened across Luna, Xeno, and the agent flow.",
+      "status": "Patch",
+      "version": "0.1.0",
+      "date": "April 2, 2026",
+      "notes": [
+        "Runtime resource limits now affect real Luna behavior instead of only local UI state.",
+        "Project, chat, and gallery flows were aligned into a cleaner shared shell.",
+        "Electron desktop identity and internal system layout were refined."
+      ]
+    }
+  ]
+}

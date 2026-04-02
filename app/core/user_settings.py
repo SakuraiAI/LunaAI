@@ -32,6 +32,9 @@ class UserWorkspaceSettings:
     cloud_root_path: str = ""
     cloud_account_email: str = ""
     cloud_auto_sync: bool = False
+    cpu_limit_percent: int = 55
+    gpu_limit_percent: int = 60
+    memory_limit_percent: int = 50
 
 
 class UserSettingsStore:
@@ -58,6 +61,10 @@ class UserSettingsStore:
             current = getattr(self.data, field_name)
             if isinstance(current, bool):
                 if isinstance(value, bool):
+                    setattr(self.data, field_name, value)
+                continue
+            if isinstance(current, int):
+                if isinstance(value, int):
                     setattr(self.data, field_name, value)
                 continue
             if isinstance(current, str) and isinstance(value, str):

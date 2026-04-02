@@ -1,0 +1,23 @@
+{
+  "name": "lunaai-electron-shell",
+  "version": "0.1.0",
+  "private": true,
+  "main": "electron/main.js",
+  "type": "module",
+  "scripts": {
+    "dev": "concurrently -k \"vite\" \"wait-on tcp:5173 && electron .\"",
+    "build": "vite build",
+    "start": "electron ."
+  },
+  "dependencies": {
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^4.3.1",
+    "concurrently": "^9.0.1",
+    "electron": "^33.2.1",
+    "vite": "^5.4.10",
+    "wait-on": "^8.0.1"
+  }
+}

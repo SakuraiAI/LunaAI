@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import platform
 from pathlib import Path
-from typing import Any
+from typing import Any, Mapping, Sequence, cast
 
-from PySide6.QtCore import Property, QObject, Qt, QAbstractListModel, QModelIndex, QByteArray, Signal, Slot
+from PySide6.QtCore import Property, QObject, Qt, QAbstractListModel, QModelIndex, QPersistentModelIndex, QByteArray, Signal, Slot
 from PySide6.QtGui import QGuiApplication
 from PySide6.QtQml import QQmlApplicationEngine
 
@@ -17,12 +17,12 @@ class DictListModel(QAbstractListModel):
         self._role_map = {Qt.ItemDataRole.UserRole + 1 + index: name for index, name in enumerate(role_names)}
         self._items: list[dict[str, object]] = []
 
-    def rowCount(self, parent: QModelIndex = QModelIndex()) -> int:
+    def rowCount(self, parent: QModelIndex | QPersistentModelIndex = QModelIndex()) -> int:
         if parent.isValid():
             return 0
         return len(self._items)
 
-    def data(self, index: QModelIndex, role: int = Qt.ItemDataRole.DisplayRole) -> Any:
+    def data(self, index: QModelIndex | QPersistentModelIndex, role: int = Qt.ItemDataRole.DisplayRole) -> Any:
         if not index.isValid() or not (0 <= index.row() < len(self._items)):
             return None
         item = self._items[index.row()]
@@ -34,9 +34,9 @@ class DictListModel(QAbstractListModel):
     def roleNames(self) -> dict[int, QByteArray]:
         return {role: QByteArray(name.encode('utf-8')) for role, name in self._role_map.items()}
 
-    def replace_items(self, items: list[dict[str, object]]) -> None:
+    def replace_items(self, items: Sequence[Mapping[str, object]]) -> None:
         self.beginResetModel()
-        self._items = items
+        self._items = [dict(item) for item in items]
         self.endResetModel()
 
 
@@ -353,8 +353,10 @@ class LunaQmlBridge(QObject):
         if not project:
             self._set_project_memory_text('No project memory yet.')
             return
-        memory_entries = project.get('memory_entries', []) if isinstance(project.get('memory_entries', []), list) else []
-        attachment_names = project.get('attachment_names', []) if isinstance(project.get('attachment_names', []), list) else []
+        raw_memory_entries = project.get('memory_entries', [])
+        raw_attachment_names = project.get('attachment_names', [])
+        memory_entries: list[object] = cast(list[object], raw_memory_entries) if isinstance(raw_memory_entries, list) else []
+        attachment_names: list[object] = cast(list[object], raw_attachment_names) if isinstance(raw_attachment_names, list) else []
         chunks = [str(item) for item in memory_entries[:6]]
         if attachment_names:
             chunks.append('Linked files: ' + ', '.join(str(name) for name in attachment_names[:6]))
@@ -369,7 +371,7 @@ class LunaQmlBridge(QObject):
     def _refresh_gallery(self) -> None:
         root = Path('data/gallery')
         root.mkdir(parents=True, exist_ok=True)
-        files = []
+        files: list[dict[str, object]] = []
         for path in sorted(root.iterdir(), key=lambda item: item.stat().st_mtime, reverse=True):
             if not path.is_file():
                 continue
