@@ -50,6 +50,21 @@ class DesktopObserverTool:
         text = text.replace("?", "-").replace("?", "-").replace("?", "...")
         return text.encode("cp1250", errors="ignore").decode("cp1250", errors="ignore") or text
 
+
+    def _safe_int(self, value: object, default: int = 0) -> int:
+        if isinstance(value, bool):
+            return int(value)
+        if isinstance(value, int):
+            return value
+        if isinstance(value, float):
+            return int(value)
+        if isinstance(value, str):
+            try:
+                return int(value)
+            except ValueError:
+                return default
+        return default
+
     def _get_screen_size(self) -> tuple[int, int]:
         width = int(self._user32.GetSystemMetrics(0))
         height = int(self._user32.GetSystemMetrics(1))
@@ -261,8 +276,8 @@ class DesktopObserverTool:
                 + self._safe_text(current.get("inferred_activity") or "unknown activity")
                 + "."
             )
-        mouse_before = (int(previous.get("mouse_x", 0) or 0), int(previous.get("mouse_y", 0) or 0))
-        mouse_now = (int(current.get("mouse_x", 0) or 0), int(current.get("mouse_y", 0) or 0))
+        mouse_before = (self._safe_int(previous.get("mouse_x", 0)), self._safe_int(previous.get("mouse_y", 0)))
+        mouse_now = (self._safe_int(current.get("mouse_x", 0)), self._safe_int(current.get("mouse_y", 0)))
         if mouse_before != mouse_now:
             dx = abs(mouse_before[0] - mouse_now[0])
             dy = abs(mouse_before[1] - mouse_now[1])
@@ -300,3 +315,7 @@ class DesktopObserverTool:
         if observation.get("detail"):
             lines.append(self._safe_text(observation.get("detail")))
         return "\n".join(lines)
+
+
+
+

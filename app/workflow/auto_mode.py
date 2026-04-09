@@ -1,4 +1,7 @@
-﻿class AutoMode:
+from app.workflow.models import WorkflowDecision
+
+
+class AutoMode:
     def decide(self, message: str) -> str:
         normalized = message.lower()
 
@@ -43,7 +46,10 @@
     def choose_strategy(self, user_input: str) -> str:
         normalized = user_input.lower()
         explanation_signals = ["how", "why", "what", "explain", "understand", "jak", "proc", "co"]
-        action_signals = ["build", "make", "create", "fix", "plan", "write", "udelat", "vytvor"]
+        action_signals = [
+            "build", "make", "create", "fix", "plan", "write", "udelat", "vytvor",
+            "otevri", "open", "implement", "scaffold", "workflow", "agent"
+        ]
 
         if any(signal in normalized for signal in explanation_signals):
             return "explain"
@@ -53,7 +59,7 @@
 
         return "balanced"
 
-    def run(self, user_input: str) -> dict[str, str]:
+    def run(self, user_input: str) -> WorkflowDecision:
         strategy = self.choose_strategy(user_input)
 
         if strategy == "explain":
@@ -61,20 +67,29 @@
                 "Auto mode selected explanation-first. "
                 "Give a more detailed answer, clarify the idea, and include examples when useful."
             )
+            automation_mode = "learning"
+            reasoning_box = "white_box"
         elif strategy == "act":
             instruction = (
                 "Auto mode selected action-first. "
                 "Focus on concrete steps, useful structure, and practical execution."
             )
+            automation_mode = "execution"
+            reasoning_box = "black_box"
         else:
             instruction = (
                 "Auto mode selected a balanced response. "
                 "Combine a clear explanation with practical next steps."
             )
+            automation_mode = "balanced"
+            reasoning_box = "black_box"
 
-        return {
-            "mode": "auto",
-            "strategy": strategy,
-            "instruction": instruction,
-            "user_input": user_input,
-        }
+        return WorkflowDecision(
+            mode="auto",
+            selected_mode="auto",
+            strategy=strategy,
+            automation_mode=automation_mode,
+            reasoning_box=reasoning_box,
+            instruction=instruction,
+            user_input=user_input,
+        )

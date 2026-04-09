@@ -55,6 +55,7 @@ const STORAGE_KEYS = {
   projects: 'lunaai-react-projects',
   gallery: 'lunaai-react-gallery',
   settings: 'lunaai-react-settings',
+  page: 'lunaai-react-page',
 };
 
 const defaultRuntimeSettings = {
@@ -130,7 +131,7 @@ export default function App() {
   const [profileOpen, setProfileOpen] = useState(false);
   const [notificationsOpen, setNotificationsOpen] = useState(false);
   const [search, setSearch] = useState('');
-  const [page, setPage] = useState('chat');
+  const [page, setPage] = useState(() => window.localStorage.getItem(STORAGE_KEYS.page) || 'chat');
   const [chats, setChats] = useState(() => readStoredJson(STORAGE_KEYS.chats, initialChats));
   const [currentChatId, setCurrentChatId] = useState(() => window.localStorage.getItem(STORAGE_KEYS.currentChatId) || initialChats[0]?.id || '');
   const [chatMessages, setChatMessages] = useState(() => readStoredJson(STORAGE_KEYS.messages, buildInitialChatThreads()));
@@ -149,6 +150,7 @@ export default function App() {
   const [pendingGenerationType, setPendingGenerationType] = useState('');
   const [projectName, setProjectName] = useState('');
   const [projectType, setProjectType] = useState('investing');
+  const [chatBusy, setChatBusy] = useState(false);
 
   const profileName = signedInAs ? signedInAs.split('@')[0] : 'Sakurai Haise';
   const notificationCount = initialNotifications.length;
@@ -223,6 +225,10 @@ export default function App() {
   }, [runtimeSettings]);
 
   useEffect(() => {
+    window.localStorage.setItem(STORAGE_KEYS.page, page);
+  }, [page]);
+
+  useEffect(() => {
     if (currentChatId) {
       window.localStorage.setItem(STORAGE_KEYS.currentChatId, currentChatId);
     } else {
@@ -240,6 +246,47 @@ export default function App() {
 
   const regularChats = useMemo(() => filteredChats.filter((chat) => !chat.projectId), [filteredChats]);
   const visibleProjects = useMemo(() => projects.filter((project) => !project.archived).sort((a, b) => Number(Boolean(b.pinned)) - Number(Boolean(a.pinned)) || (a.title || '').localeCompare(b.title || '')), [projects]);
+
+  function applyBackendChatState(result) {
+    if (!result?.ok) return false;
+    if (Array.isArray(result.chats)) {
+      setChats(result.chats);
+    }
+    if (typeof result.currentChatId === 'string') {
+      setCurrentChatId(result.currentChatId);
+    }
+    if (Array.isArray(result.messages) && typeof result.currentChatId === 'string') {
+      setChatMessages((current) => ({
+        ...current,
+        [result.currentChatId]: result.messages,
+      }));
+    }
+    return true;
+  }
+
+  useEffect(() => {
+    const api = window.lunaDesktop?.luna;
+    if (!api?.getState) return;
+
+    let cancelled = false;
+
+    async function loadChatState() {
+      try {
+        const result = await api.getState();
+        if (cancelled) return;
+        if (applyBackendChatState(result)) {
+          setStatus('Luna backend chat connected.');
+        }
+      } catch {
+        // keep local fallback state
+      }
+    }
+
+    loadChatState();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     if (!applicationsState.length) {
@@ -270,10 +317,11 @@ export default function App() {
     return chatId;
   }
 
-  function handleSend() {
+  async function handleSend() {
     const text = composer.trim();
-    if (!text && !attachmentLabel) return;
+    if ((!text && !attachmentLabel) || chatBusy) return;
 
+    const api = window.lunaDesktop?.luna;
     const activeChatId = ensureActiveChat();
     const baseText = text || 'Attachment prepared for LunaAI.';
     const decoratedText = attachmentLabel ? `${baseText}
@@ -281,17 +329,48 @@ export default function App() {
 [Attached file: ${attachmentLabel}]` : baseText;
     const mediaType = inferGeneratedMediaType(baseText, pendingGenerationType);
 
-    appendMessages(activeChatId, [
-      { id: `user-${Date.now()}`, role: 'user', author: 'You', content: decoratedText },
-      {
-        id: `assistant-${Date.now() + 1}`,
-        role: 'assistant',
-        author: 'Luna',
-        content: mediaType
-          ? `Luna prepared a ${mediaType} concept and saved it to Gallery.`
-          : 'React + Electron shell accepted the request. IPC is prepared so Luna can later forward this to local AI, Xeno, or agent logic.',
-      },
-    ]);
+    if (api?.sendMessage) {
+      setChatBusy(true);
+      try {
+        const result = await api.sendMessage({ chatId: activeChatId, text: decoratedText });
+        if (result?.ok) {
+          applyBackendChatState(result);
+          setStatus('Luna backend replied.');
+        } else {
+          appendMessages(activeChatId, [
+            { id: `user-${Date.now()}`, role: 'user', author: 'You', content: decoratedText },
+            { id: `assistant-${Date.now() + 1}`, role: 'assistant', author: 'Luna', content: result?.message || 'Luna backend did not return a valid reply.' },
+          ]);
+          setStatus(result?.message || 'Luna backend did not return a valid reply.');
+        }
+      } catch {
+        appendMessages(activeChatId, [
+          { id: `user-${Date.now()}`, role: 'user', author: 'You', content: decoratedText },
+          { id: `assistant-${Date.now() + 1}`, role: 'assistant', author: 'Luna', content: 'Spojeni s backendem se nepovedlo.' },
+        ]);
+        setStatus('Backend bridge failed.');
+      } finally {
+        setChatBusy(false);
+      }
+    } else {
+      appendMessages(activeChatId, [
+        { id: `user-${Date.now()}`, role: 'user', author: 'You', content: decoratedText },
+        {
+          id: `assistant-${Date.now() + 1}`,
+          role: 'assistant',
+          author: 'Luna',
+          content: mediaType
+            ? `Luna prepared a ${mediaType} concept and saved it to Gallery.`
+            : 'React + Electron shell accepted the request. IPC is prepared so Luna can later forward this to local AI, Xeno, or agent logic.',
+        },
+      ]);
+      setChats((current) => current.map((chat) => (
+        chat.id === activeChatId && chat.title === 'New Chat' && text
+          ? { ...chat, title: text.slice(0, 36) }
+          : chat
+      )));
+      setStatus('Message routed through the LunaAI renderer shell.');
+    }
 
     if (mediaType) {
       const galleryEntry = {
@@ -305,16 +384,9 @@ export default function App() {
       setGallery((current) => [galleryEntry, ...current]);
     }
 
-    setChats((current) => current.map((chat) => (
-      chat.id === activeChatId && chat.title === 'New Chat' && text
-        ? { ...chat, title: text.slice(0, 36) }
-        : chat
-    )));
-
     setComposer('');
     setAttachmentLabel('');
     setPendingGenerationType('');
-    setStatus('Message routed through the LunaAI renderer shell.');
     setPage('chat');
   }
 
@@ -350,21 +422,43 @@ export default function App() {
     }
   }
 
-  function handleNewChat() {
-    const chatId = `chat-${Date.now()}`;
-    const newChat = { id: chatId, title: 'New Chat', pinned: false, archived: false, kind: 'chat' };
-    setChats((current) => [newChat, ...current]);
-    setCurrentChatId(chatId);
-    setChatMessages((current) => ({ ...current, [chatId]: [] }));
+  async function handleNewChat() {
+    const api = window.lunaDesktop?.luna;
+    if (api?.createChat) {
+      try {
+        const result = await api.createChat('New chat');
+        if (applyBackendChatState(result)) {
+          setStatus('New conversation created.');
+        }
+      } catch {
+        setStatus('Creating a backend chat failed.');
+      }
+    } else {
+      const chatId = `chat-${Date.now()}`;
+      const newChat = { id: chatId, title: 'New Chat', pinned: false, archived: false, kind: 'chat' };
+      setChats((current) => [newChat, ...current]);
+      setCurrentChatId(chatId);
+      setChatMessages((current) => ({ ...current, [chatId]: [] }));
+      setStatus('New conversation created.');
+    }
     setComposer('');
     setAttachmentLabel('');
     setPendingGenerationType('');
     setPage('chat');
-    setStatus('New conversation created.');
   }
 
-  function handleChatOpen(chatId) {
-    setCurrentChatId(chatId);
+  async function handleChatOpen(chatId) {
+    const api = window.lunaDesktop?.luna;
+    if (api?.switchChat) {
+      try {
+        const result = await api.switchChat(chatId);
+        applyBackendChatState(result);
+      } catch {
+        setCurrentChatId(chatId);
+      }
+    } else {
+      setCurrentChatId(chatId);
+    }
     setPage('chat');
     setStatus('Conversation ready.');
   }
@@ -398,6 +492,21 @@ export default function App() {
         setChats((current) => current.map((chat) => (chat.id === linkedChatId ? { ...chat, title: next } : chat)));
       }
       setStatus('Project title updated.');
+      closeContextMenu();
+      return;
+    }
+
+    const api = window.lunaDesktop?.luna;
+    if (api?.renameChat) {
+      api.renameChat(contextMenu.targetId, next)
+        .then((result) => {
+          applyBackendChatState(result);
+          setStatus('Chat title updated.');
+        })
+        .catch(() => {
+          setChats((current) => current.map((chat) => (chat.id === contextMenu.targetId ? { ...chat, title: next } : chat)));
+          setStatus('Chat title updated locally.');
+        });
       closeContextMenu();
       return;
     }
@@ -439,6 +548,30 @@ export default function App() {
         }
       }
       setStatus('Project removed from the workspace.');
+      closeContextMenu();
+      return;
+    }
+
+    const api = window.lunaDesktop?.luna;
+    if (api?.deleteChat) {
+      api.deleteChat(contextMenu.targetId)
+        .then((result) => {
+          applyBackendChatState(result);
+          setStatus('Chat removed from the workspace.');
+        })
+        .catch(() => {
+          const nextChats = chats.filter((chat) => chat.id !== contextMenu.targetId);
+          setChats(nextChats);
+          setChatMessages((current) => {
+            const next = { ...current };
+            delete next[contextMenu.targetId];
+            return next;
+          });
+          if (currentChatId === contextMenu.targetId) {
+            setCurrentChatId(nextChats[0]?.id ?? '');
+          }
+          setStatus('Chat removed locally.');
+        });
       closeContextMenu();
       return;
     }

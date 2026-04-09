@@ -18,6 +18,7 @@ from app.core.user_settings import UserSettingsStore
 from app.memory.chat_memory import ChatMemory
 from app.memory.long_memory import LongMemory
 from app.models.local_model import LocalModel
+from app.models.nvidia_model import NvidiaModel
 from app.tools.desktop_actions import DesktopActionTool
 from app.tools.desktop_observer import DesktopObserverTool
 from app.tools.internet import InternetTool
@@ -37,6 +38,14 @@ class LunaEngine:
             api_token=self.settings.lm_studio_api_token,
             timeout_seconds=self.settings.lm_studio_timeout_seconds,
         )
+        self.support_model = NvidiaModel(
+            model_name=self.settings.nvidia_model,
+            base_url=self.settings.nvidia_base_url,
+            api_token=self.settings.nvidia_api_token,
+            timeout_seconds=self.settings.nvidia_timeout_seconds,
+            reasoning_budget=self.settings.nvidia_reasoning_budget,
+            enable_thinking=self.settings.nvidia_enable_thinking,
+        )
         self.memory = ChatMemory(Path(self.settings.memory_path))
         self.long_memory = LongMemory(Path(self.settings.long_memory_path))
         self.workflow = WorkflowManager()
@@ -53,6 +62,8 @@ class LunaEngine:
         self.pending_action: tuple[str, str, Callable[[], str]] | None = None
         self.observe_mode_enabled = False
         self.last_desktop_observation: dict[str, object] | None = None
+        self.last_model_debug = ""
+        self._last_support_model_source = "unused"
 
         try:
             timezone = ZoneInfo("Europe/Prague")
@@ -194,10 +205,37 @@ class LunaEngine:
         profile = self._runtime_budget_profile()
         parts = [self.xeno.build_hidden_support(user_input, intelligence_level=level)]
         if bool(profile["xeno_model_support"]):
-            model_support = self.xeno.build_model_support(user_input, self.model.generate, intelligence_level=level)
+            model_support = self.xeno.build_model_support(user_input, self._support_generate, intelligence_level=level)
             if model_support:
                 parts.append("Hidden Xeno model guidance:\n" + model_support)
         return "\n".join(part for part in parts if part.strip())
+
+    def _support_generate(self, messages: list[dict[str, str]]) -> str:
+        if self.support_model.is_available():
+            try:
+                self._last_support_model_source = "nvidia"
+                return self.support_model.generate(messages)
+            except Exception:
+                self._last_support_model_source = "lm_studio_fallback"
+        else:
+            self._last_support_model_source = "lm_studio_fallback"
+        return self.model.generate(messages)
+
+    def _build_model_debug_footer(self, *, xeno_consulted: bool) -> str:
+        source_map = {
+            "nvidia": "NVIDIA",
+            "lm_studio_fallback": "LM Studio fallback",
+            "unused": "nepouzito",
+        }
+        support_source = source_map.get(self._last_support_model_source, self._last_support_model_source or "nepouzito")
+        consulted = "ano" if xeno_consulted else "ne"
+        return (
+            "[Model debug]\n"
+            f"Luna model: {self.settings.lm_studio_model}\n"
+            f"Xeno model: {self.settings.nvidia_model}\n"
+            f"Xeno consulted: {consulted}\n"
+            f"Xeno source: {support_source}"
+        )
 
     def _action_mode(self) -> str:
         mode = str(self.user_settings.data.agent_execution_mode or "ask").strip().lower()
@@ -656,6 +694,23 @@ class LunaEngine:
 
     def _split_action_chain(self, user_input: str) -> list[str]:
         normalized = " ".join(user_input.strip().split())
+
+        targeted_patterns = [
+            r'^(otevri(?:t)?|otev\?i(?:t)?|open|spust|spustit|launch) (.+?) a (vytvor|vytvo\?|udelej|ud\?lej|create|make) (.+)$',
+        ]
+        for pattern in targeted_patterns:
+            match = re.search(pattern, normalized, flags=re.IGNORECASE)
+            if not match:
+                continue
+            first_verb = str(match.group(1)).strip()
+            first_target = str(match.group(2)).strip()
+            second_verb = str(match.group(3)).strip()
+            second_target = str(match.group(4)).strip()
+            first_part = f"{first_verb} {first_target}".strip(' ,.')
+            second_part = f"{second_verb} {second_target}".strip(' ,.')
+            if first_part and second_part:
+                return [first_part, second_part]
+
         separators = [
             r"\s+a pak\s+",
             r"\s+potom\s+",
@@ -671,7 +726,7 @@ class LunaEngine:
 
     def _chain_action_category(self, parts: list[str]) -> str:
         lowered = " ".join(parts).lower()
-        if any(token in lowered for token in ["vytvor", "create", "make", "prepis", "rewrite", "overwrite", "append", "pridej do"]):
+        if any(token in lowered for token in ["vytvor", "udelej", "create", "make", "prepis", "rewrite", "overwrite", "append", "pridej do"]):
             return "file_change"
         if any(token in lowered for token in ["vscode", "vs code", "blender", "unreal", "unity", "photoshop", "davinci", "premiere", "after effects", "figma", "fl studio", "substance"]):
             return "app_launch"
@@ -728,9 +783,9 @@ class LunaEngine:
             return None
 
         project_blueprints = [
-            (r'(?:vytvor|vytvo?|create|make) python projekt (.+?)(?: a otevri ve vscode| and open in vscode)?$', "python"),
-            (r'(?:vytvor|vytvo?|create|make) web projekt (.+?)(?: a otevri ve vscode| and open in vscode)?$', "web"),
-            (r'(?:vytvor|vytvo?|create|make) pyside projekt (.+?)(?: a otevri ve vscode| and open in vscode)?$', "pyside"),
+            (r'(?:vytvor|vytvo?|udelej|ud\\?lej|create|make) python projekt (.+?)(?: a otevri ve vscode| and open in vscode)?$', "python"),
+            (r'(?:vytvor|vytvo?|udelej|ud\\?lej|create|make) web projekt (.+?)(?: a otevri ve vscode| and open in vscode)?$', "web"),
+            (r'(?:vytvor|vytvo?|udelej|ud\\?lej|create|make) pyside projekt (.+?)(?: a otevri ve vscode| and open in vscode)?$', "pyside"),
         ]
         for pattern, kind in project_blueprints:
             match = re.search(pattern, normalized, flags=re.IGNORECASE)
@@ -774,7 +829,7 @@ class LunaEngine:
             return self._guarded_action("file_change", f"append to file {target}", lambda: self.desktop_actions.append_to_file(target, content))
 
         multi_file_match = re.search(
-            r'(?:vytvor|vytvo?|create|make) (?:soubory|files) (.+?)(?: (?:a )?otevri ve vscode| (?:and )?open in vscode)?$',
+            r'(?:vytvor|vytvo?|udelej|ud\\?lej|create|make) (?:soubory|files) (.+?)(?: (?:a )?otevri ve vscode| (?:and )?open in vscode)?$',
             normalized,
             flags=re.IGNORECASE,
         )
@@ -796,7 +851,7 @@ class LunaEngine:
 
             return self._guarded_action("file_change", f"create files {', '.join(parts)}", create_many_files)
         rich_file_match = re.search(
-            r'(?:vytvor|vytvo?|create|make) (?:soubor|file) (.+?) (?:s obsahem|with content) (.+?)(?: (?:a )?otevri ve vscode| (?:and )?open in vscode)?$',
+            r'(?:vytvor|vytvo?|udelej|ud\\?lej|create|make) (?:soubor|file) (.+?) (?:s obsahem|with content) (.+?)(?: (?:a )?otevri ve vscode| (?:and )?open in vscode)?$',
             normalized,
             flags=re.IGNORECASE,
         )
@@ -814,7 +869,7 @@ class LunaEngine:
 
             return self._guarded_action("file_change", f"create file {target}", create_rich_file)
 
-        create_folder_patterns = [r'(?:vytvor|vytvo?|create|make) (?:slozku|slo?ku|folder|adresar|adres??) (.+)$']
+        create_folder_patterns = [r'(?:vytvor|vytvo?|udelej|ud\\?lej|create|make) (?:slozku|slo?ku|folder|adresar|adres??) (.+)$']
         for pattern in create_folder_patterns:
             match = re.search(pattern, normalized, flags=re.IGNORECASE)
             if not match:
@@ -822,7 +877,7 @@ class LunaEngine:
             target = self._resolve_creation_target(match.group(1))
             return self._guarded_action("file_change", f"create folder {target}", lambda: self.desktop_actions.create_folder(target))
 
-        create_file_patterns = [r'(?:vytvor|vytvo?|create|make) (?:soubor|file) (.+)$']
+        create_file_patterns = [r'(?:vytvor|vytvo?|udelej|ud\\?lej|create|make) (?:soubor|file) (.+)$']
         for pattern in create_file_patterns:
             match = re.search(pattern, normalized, flags=re.IGNORECASE)
             if not match:
@@ -1086,8 +1141,13 @@ class LunaEngine:
         selected_mode = workflow_data.get("selected_mode", workflow_data.get("mode", "auto"))
         self.memory_coordinator.remember_user_input(cleaned_input, selected_mode)
 
+        self._last_support_model_source = "unused"
+        xeno_consulted = self.xeno.should_consult(workflow_data["user_input"])
         internet_context = self._internet_context(workflow_data["user_input"])
         hidden_support = self._hidden_xeno_support(workflow_data["user_input"])
+        automation_summary = self.xeno.build_automation_summary(workflow_data["user_input"])
+        if automation_summary:
+            hidden_support = (f"{hidden_support}\n\n{automation_summary}".strip() if hidden_support else automation_summary)
         if self.observe_mode_enabled:
             observer_context = self._observer_context(refresh=self._observer_refresh_enabled())
             if observer_context:
@@ -1109,6 +1169,11 @@ class LunaEngine:
         )
 
         response = self.model.generate(messages)
+        if not str(response).strip():
+            response = "Luna: Nic jsem z modelu nedostala. Zkus to prosim znovu."
+        debug_footer = self._build_model_debug_footer(xeno_consulted=xeno_consulted)
+        self.last_model_debug = debug_footer
+        response = f"{str(response).rstrip()}\n\n---\n{debug_footer}"
         self.memory_coordinator.save_exchange(cleaned_input, response)
         self._remember_project_chat_focus(cleaned_input, response)
         return response
@@ -1296,7 +1361,7 @@ class LunaEngine:
             agent_model_support = self.xeno.task_agent.build_model_execution_support(
                 objective=project.brief,
                 tasks=preview_tasks,
-                model_generate=self.model.generate,
+                model_generate=self._support_generate,
                 intelligence_level=intelligence_level,
             )
 
@@ -1370,6 +1435,15 @@ class LunaEngine:
             task_title = str(task_payload)
             task_data = {"title": task_title}
 
+        task_model_support = ""
+        if bool(self._runtime_budget_profile()["xeno_model_support"]):
+            task_model_support = self.xeno.task_agent.build_model_execution_support(
+                objective=project.brief,
+                tasks=[task_data],
+                model_generate=self._support_generate,
+                intelligence_level=self._normalized_intelligence_level(),
+            )
+
         action_hint = str(task_data.get("action_hint", "")).strip().lower()
         if action_hint == "observe_desktop_state":
             observation = self.desktop_observer.observe(include_screenshot=False)
@@ -1416,10 +1490,16 @@ class LunaEngine:
             self.projects.add_memory_entry(project_id, f"Agent failed: {task_title} -> {detail or action_result.get('message', '')}")
         self._log_action(category, f"task action: {task_title}", status, detail or str(action_result.get("message", "")))
         updated = self.projects.get_project(project_id)
+        final_message = str(action_result.get("message", "Task agent ran an action."))
+        final_detail = detail
+        if task_model_support:
+            self.projects.add_memory_entry(project_id, f"Agent model guidance: {task_model_support[:220]}")
+            final_message = (final_message + "\n\nAgent model guidance:\n" + task_model_support).strip()
+            final_detail = (detail + "\n\nAgent model guidance:\n" + task_model_support).strip() if detail else task_model_support
         return {
             "ok": is_ok,
-            "message": str(action_result.get("message", "Task agent ran an action.")),
-            "detail": detail,
+            "message": final_message,
+            "detail": final_detail,
             "status": status,
             "workspace": action_result.get("workspace", ""),
             "project": self._serialize_project(updated),
@@ -1474,7 +1554,7 @@ class LunaEngine:
     def generate_project_package(self, user_input: str, project_name: str = "") -> dict[str, object]:
         intelligence_level = self._normalized_intelligence_level()
         result = self.xeno.project_builder.build_from_request(user_input, intelligence_level=intelligence_level)
-        blueprint_text = self.xeno.handle(user_input, intelligence_level=intelligence_level, model_generate=self.model.generate)
+        blueprint_text = self.xeno.handle(user_input, intelligence_level=intelligence_level, model_generate=self._support_generate)
         tasks = [
             {
                 "title": step.title,
@@ -1489,7 +1569,7 @@ class LunaEngine:
             for step in (result.agent_run.steps if result.agent_run else [])
         ]
         handoff_summary = result.agent_run.handoff_summary if result.agent_run is not None else ""
-        xeno_model_support = self.xeno.build_model_support(user_input, self.model.generate, intelligence_level=intelligence_level)
+        xeno_model_support = self.xeno.build_model_support(user_input, self._support_generate, intelligence_level=intelligence_level)
         resolved_name = project_name.strip() or result.blueprint.project_name
         current = self.projects.get_current_project()
         if current is None:
@@ -1546,6 +1626,7 @@ class LunaEngine:
             print(response)
             if user_input.lower() == "exit":
                 break
+
 
 
 

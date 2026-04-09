@@ -72,8 +72,8 @@
         }
       ],
       "memory_entries": [
-        "Luna direction: LM Studio is not reachable. Make sure the LM Studio server is running and reachable at http://192.168.31.23:1234/api/v1/chat. Details: <urlopen error [WinError ...",
-        "Chat focus: jak se mas",
+        "Luna direction: Ahoj! 😊 Rozumím, že chceš spustit příkaz `& 'C:\\Program Files\\nodejs\\npm.cmd' run dev`. Udělala jsem to! Spustila jsem tento příkaz pro tebe. 🚀\n\nZkontroluji, zd...",
+        "Chat focus: & 'C:\\Program Files\\nodejs\\npm.cmd' run dev",
         "Agent action: Observe the active workspace state -> Luna desktop observation:\nActive window: Grioten, xlout - ADRENALINA // SPEED UP | YouTube Music - Google Chrome\nApp: Web browser\nProcess: chrome.exe (PID 12528)\nMeaning: watching or browsing YouTube\nMouse position: 1848, 836\nScreen size: 2560x1440\nDetected context: youtube\nDesktop observation captured.",
         "Desktop observe: Web browser -> watching or browsing YouTube | Grioten, xlout - ADRENALINA // SPEED UP | YouTube Music - Google Chrome",
         "Agent handoff: Agent handoff ready: Lock the first milestone. Immediate action: Agent can immediately prepare a clean scope document for review. Queued after that: Map the execution path | Prepare local workspace | Build the first working slice",

@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from PySide6.QtCore import QEasingCurve, QObject, QParallelAnimationGroup, QPropertyAnimation, Qt, QThread, QTimer, QSize, Signal, Slot, QUrl
-from PySide6.QtGui import QCloseEvent, QColor, QCursor, QDesktopServices, QIcon, QKeyEvent, QPainter, QPainterPath, QPixmap, QTextCursor
+from PySide6.QtGui import QCloseEvent, QColor, QCursor, QDesktopServices, QIcon, QKeyEvent, QPainter, QPainterPath, QPixmap, QTextCursor, QShowEvent
 from PySide6.QtWidgets import (
     QApplication,
     QCheckBox,
@@ -819,8 +819,9 @@ class LunaMainWindow(QMainWindow):
         self.pending_thinking: TypingBubble | None = None
         self.reveal_timer: QTimer | None = None
         self.reveal_bubble: MessageBubble | None = None
-        self.reveal_tokens: list[str] = []
+        self.reveal_full_text = ""
         self.reveal_text = ""
+        self.reveal_index = 0
         self.pending_attachments: list[str] = []
         self.sidebar_expanded_width = 264
         self.sidebar_visible = True
@@ -856,6 +857,13 @@ class LunaMainWindow(QMainWindow):
         self._update_empty_state()
         self.switch_page(0)
         self._schedule_scroll_to_bottom()
+
+    def showEvent(self, event: QShowEvent) -> None:
+        super().showEvent(event)
+        self._schedule_scroll_to_bottom()
+        QTimer.singleShot(220, self._scroll_chat_to_bottom)
+        QTimer.singleShot(420, self._scroll_chat_to_bottom)
+        QTimer.singleShot(700, self._scroll_chat_to_bottom)
 
     def _make_logo_label(self, size: int, object_name: str) -> QLabel:
         label = QLabel()
@@ -2337,6 +2345,7 @@ class LunaMainWindow(QMainWindow):
         QTimer.singleShot(0, self._scroll_chat_to_bottom)
         QTimer.singleShot(40, self._scroll_chat_to_bottom)
         QTimer.singleShot(120, self._scroll_chat_to_bottom)
+        QTimer.singleShot(260, self._scroll_chat_to_bottom)
 
     def _load_history(self) -> None:
         self.chat_area.clear_messages()
@@ -3261,13 +3270,35 @@ class LunaMainWindow(QMainWindow):
             self.reveal_timer.stop()
             self.reveal_timer.deleteLater()
             self.reveal_timer = None
-        self.reveal_tokens = []
+        self.reveal_full_text = ""
         self.reveal_text = ""
+        self.reveal_index = 0
         if keep_bubble:
             self.reveal_bubble = None
         elif self.reveal_bubble is not None:
             self.reveal_bubble.deleteLater()
             self.reveal_bubble = None
+
+    def _finish_response_reveal(self) -> None:
+        if self.reveal_bubble is None:
+            self._stop_response_reveal(True)
+            self._set_busy(False, "LunaAI")
+            return
+        if self.reveal_full_text:
+            self.reveal_text = self.reveal_full_text
+            self.reveal_index = len(self.reveal_full_text)
+            self.reveal_bubble.set_text(self.reveal_full_text)
+            self._scroll_chat_to_bottom()
+        if self.reveal_timer is not None:
+            self.reveal_timer.stop()
+            self.reveal_timer.deleteLater()
+            self.reveal_timer = None
+        self.reveal_full_text = ""
+        self.reveal_text = ""
+        self.reveal_index = 0
+        self.reveal_bubble = None
+        self._set_busy(False, "LunaAI")
+
     def _set_busy(self, busy: bool, status: str) -> None:
         self.message_input.setDisabled(busy)
         self.empty_message_input.setDisabled(busy)
@@ -3305,10 +3336,11 @@ class LunaMainWindow(QMainWindow):
         self._stop_response_reveal()
         self.reveal_bubble = MessageBubble("Luna", "", False)
         self.chat_area.chat_layout.insertWidget(self.chat_area.chat_layout.count() - 1, self.reveal_bubble)
-        self.reveal_tokens = cleaned.split()
+        self.reveal_full_text = cleaned
         self.reveal_text = ""
+        self.reveal_index = 0
 
-        if not self.reveal_tokens:
+        if not self.reveal_full_text:
             self.reveal_bubble.set_text(cleaned)
             self.reveal_bubble = None
             self._set_busy(False, "LunaAI")
@@ -3317,26 +3349,23 @@ class LunaMainWindow(QMainWindow):
 
         self.reveal_timer = QTimer(self)
         self.reveal_timer.timeout.connect(self._reveal_next_chunk)
-        self.reveal_timer.start(26)
+        self.reveal_timer.start(14)
 
     def _reveal_next_chunk(self) -> None:
         if self.reveal_bubble is None:
             self._stop_response_reveal(True)
             self._set_busy(False, "LunaAI")
             return
-        chunk = self.reveal_tokens[:3]
-        self.reveal_tokens = self.reveal_tokens[3:]
-        if chunk:
-            self.reveal_text = (self.reveal_text + " " + " ".join(chunk)).strip()
-            self.reveal_bubble.set_text(self.reveal_text)
-            self._scroll_chat_to_bottom()
-        if not self.reveal_tokens:
-            if self.reveal_timer is not None:
-                self.reveal_timer.stop()
-                self.reveal_timer.deleteLater()
-                self.reveal_timer = None
-            self.reveal_bubble = None
-            self._set_busy(False, "LunaAI")
+        if not self.reveal_full_text:
+            self._finish_response_reveal()
+            return
+        next_index = min(len(self.reveal_full_text), self.reveal_index + 10)
+        self.reveal_index = next_index
+        self.reveal_text = self.reveal_full_text[:self.reveal_index]
+        self.reveal_bubble.set_text(self.reveal_text)
+        self._scroll_chat_to_bottom()
+        if self.reveal_index >= len(self.reveal_full_text):
+            self._finish_response_reveal()
 
     def _handle_worker_finished(self, response: str) -> None:
         self._remove_thinking_placeholder()
@@ -3356,7 +3385,11 @@ class LunaMainWindow(QMainWindow):
         primary_text = self.message_input.toPlainText().strip()
         empty_text = self.empty_message_input.toPlainText().strip()
         text = primary_text or empty_text
-        if not text or self.worker_thread is not None or self.reveal_timer is not None:
+        if self.worker_thread is not None:
+            return
+        if self.reveal_timer is not None:
+            self._finish_response_reveal()
+        if not text:
             return
 
         final_text = text

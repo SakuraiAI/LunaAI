@@ -29,15 +29,28 @@ class LocalModel(BaseModel):
     def _extract_output_text(self, data: dict) -> str:
         output = data.get("output", "")
 
-        if isinstance(output, str):
+        if isinstance(output, str) and output.strip():
             return output.strip()
 
         if isinstance(output, list) and output:
             first_item = output[0]
             if isinstance(first_item, dict):
                 content = first_item.get("content", "")
-                if isinstance(content, str):
+                if isinstance(content, str) and content.strip():
                     return content.strip()
+
+        choices = data.get("choices", [])
+        if isinstance(choices, list) and choices:
+            first_choice = choices[0]
+            if isinstance(first_choice, dict):
+                message = first_choice.get("message", {})
+                if isinstance(message, dict):
+                    message_content = message.get("content", "")
+                    if isinstance(message_content, str) and message_content.strip():
+                        return message_content.strip()
+                text = first_choice.get("text", "")
+                if isinstance(text, str) and text.strip():
+                    return text.strip()
 
         raise KeyError("output")
 
@@ -63,7 +76,10 @@ class LocalModel(BaseModel):
         if cleaned.startswith("Assistant: "):
             cleaned = cleaned.removeprefix("Assistant: ").strip()
 
-        return clean_model_response_text(cleaned)
+        final_text = clean_model_response_text(cleaned)
+        if final_text.strip():
+            return final_text
+        return cleaned or "Luna: Odpoved modelu byla prazdna."
 
     def configure_runtime_limits(
         self,
@@ -111,7 +127,6 @@ class LocalModel(BaseModel):
             "system_prompt": system_prompt,
             "input": input_text,
             "temperature": 0.1,
-            "max_tokens": self._runtime_output_budget(),
         }
 
         headers = {"Content-Type": "application/json"}
@@ -160,3 +175,7 @@ class LocalModel(BaseModel):
             return f"Luna: Invalid response from local model -> {error}"
         except Exception as error:
             return f"Luna: Unexpected local model error -> {error}"
+
+
+
+

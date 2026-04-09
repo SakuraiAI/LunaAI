@@ -62,6 +62,13 @@ export default function ChatInput({ value, onChange, onSend, onAction, attachmen
     setMenuOpen(false);
   }
 
+  function handleKeyDown(event) {
+    if (event.key === 'Enter' && !event.shiftKey) {
+      event.preventDefault();
+      onSend();
+    }
+  }
+
   return (
     <div className={`chat-input-shell ${centered ? 'is-centered' : ''}`}>
       <div className="chat-input-plus-zone" ref={menuRef}>
@@ -93,6 +100,7 @@ export default function ChatInput({ value, onChange, onSend, onAction, attachmen
           ref={textareaRef}
           value={value}
           onChange={(event) => onChange(event.target.value)}
+          onKeyDown={handleKeyDown}
           placeholder="Message Luna..."
           rows={1}
         />

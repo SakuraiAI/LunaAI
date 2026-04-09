@@ -1,4 +1,4 @@
-﻿from typing import Callable
+from typing import Callable
 
 from app.xeno.project_builder import ProjectBuilder
 from app.xeno.planner import XenoPlanner
@@ -22,11 +22,36 @@ class XenoCoordinator:
             "She focuses on planning, architecture, research structure, execution strategy, and turning requests into agent-ready action tracks."
         )
 
-    def should_consult(self, user_input: str) -> bool:
+    def classify_request(self, user_input: str) -> dict[str, object]:
         normalized = user_input.strip()
         if not normalized:
-            return False
-        return self.planner.is_project_builder_request(normalized) or self.task_agent.can_handle(normalized)
+            return {
+                "consult": False,
+                "project_request": False,
+                "action_request": False,
+                "automation_mode": "none",
+            }
+
+        project_request = self.planner.is_project_builder_request(normalized)
+        action_request = self.task_agent.can_handle(normalized)
+        consult = project_request or action_request
+        automation_mode = "balanced"
+        if project_request and action_request:
+            automation_mode = "hybrid"
+        elif project_request:
+            automation_mode = "planning"
+        elif action_request:
+            automation_mode = "execution"
+
+        return {
+            "consult": consult,
+            "project_request": project_request,
+            "action_request": action_request,
+            "automation_mode": automation_mode,
+        }
+
+    def should_consult(self, user_input: str) -> bool:
+        return bool(self.classify_request(user_input)["consult"])
 
     def _clean_model_support(self, text: str) -> str:
         cleaned = str(text or "").strip()
@@ -35,6 +60,17 @@ class XenoCoordinator:
         if cleaned.startswith("Xeno:"):
             cleaned = cleaned.removeprefix("Xeno:").strip()
         return cleaned
+
+    def build_automation_summary(self, user_input: str) -> str:
+        summary = self.classify_request(user_input)
+        if not summary["consult"]:
+            return ""
+        parts: list[str] = [f"Automation mode: {summary['automation_mode']}"]
+        if summary["project_request"]:
+            parts.append("Project planning track active")
+        if summary["action_request"]:
+            parts.append("Task-agent execution track active")
+        return " | ".join(parts)
 
     def build_model_support(
         self,
@@ -48,22 +84,27 @@ class XenoCoordinator:
         level = str(intelligence_level).strip()
         if level not in {"4", "5"}:
             return ""
-        if not self.should_consult(user_input):
+
+        request_shape = self.classify_request(user_input)
+        if not request_shape["consult"]:
             return ""
 
         project_summary = ""
         action_summary = ""
-        if self.planner.is_project_builder_request(user_input):
+        if request_shape["project_request"]:
             result = self.project_builder.build_from_request(user_input, intelligence_level=level)
+            handoff_summary = "No action-ready agent handoff yet."
+            if result.agent_run is not None:
+                handoff_summary = self.task_agent.create_handoff_summary(result.agent_run)
             project_summary = (
                 f"Project: {result.blueprint.project_name}. "
                 f"Type: {result.blueprint.project_type}. "
                 f"Difficulty: {result.blueprint.difficulty}. "
                 f"Milestones: {' | '.join(result.blueprint.milestones[:4])}. "
                 f"Risks: {' | '.join(result.blueprint.risks[:4])}. "
-                f"Agent handoff: {self.task_agent.create_handoff_summary(result.agent_run)}"
+                f"Agent handoff: {handoff_summary}"
             )
-        if self.task_agent.can_handle(user_input):
+        if request_shape["action_request"]:
             action_summary = self.task_agent.create_action_support(user_input, intelligence_level=level)
 
         system_prompt = (
@@ -75,6 +116,7 @@ class XenoCoordinator:
         )
         user_prompt = (
             f"Intelligence level: {level}\n"
+            f"Automation mode: {request_shape['automation_mode']}\n"
             f"User request: {user_input}\n"
             f"Planning context: {project_summary or 'No project blueprint needed.'}\n"
             f"Action context: {action_summary or 'No action-specific support.'}"
@@ -95,8 +137,13 @@ class XenoCoordinator:
     def build_hidden_support(self, user_input: str, intelligence_level: str = "4") -> str:
         parts: list[str] = []
         level = str(intelligence_level).strip()
+        request_shape = self.classify_request(user_input)
 
-        if self.planner.is_project_builder_request(user_input):
+        automation_summary = self.build_automation_summary(user_input)
+        if automation_summary:
+            parts.append("Hidden Xeno automation: " + automation_summary)
+
+        if request_shape["project_request"]:
             result = self.project_builder.build_from_request(user_input, intelligence_level=level)
             step_titles = ", ".join(step.title for step in result.agent_run.steps[:4]) if result.agent_run else ""
             parts.append(
@@ -113,13 +160,13 @@ class XenoCoordinator:
             if result.agent_run is not None:
                 parts.append("Hidden Xeno handoff: " + self.task_agent.create_handoff_summary(result.agent_run))
 
-        if self.task_agent.can_handle(user_input):
+        if request_shape["action_request"]:
             parts.append(self.task_agent.create_action_support(user_input, intelligence_level=level))
 
-        return "\n".join(parts)
+        return "\n".join(part for part in parts if part)
 
     def can_handle(self, user_input: str) -> bool:
-        return self.planner.is_project_builder_request(user_input)
+        return bool(self.classify_request(user_input)["project_request"])
 
     def handle(
         self,
@@ -132,6 +179,9 @@ class XenoCoordinator:
         agent_text = self.task_agent.format_run(result.agent_run) if result.agent_run else ""
         model_support = self.build_model_support(user_input, model_generate, intelligence_level=intelligence_level)
         parts = [result.summary, result.xeno_note]
+        automation_summary = self.build_automation_summary(user_input)
+        if automation_summary:
+            parts.append("Xeno automation:\n" + automation_summary)
         if model_support:
             parts.append("Xeno model guidance:\n" + model_support)
         parts.append(blueprint_text)

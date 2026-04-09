@@ -1,6 +1,7 @@
-﻿from app.workflow.auto_mode import AutoMode
+from app.workflow.auto_mode import AutoMode
 from app.workflow.collaboration import CollaborationWorkflow
 from app.workflow.learning import LearningWorkflow
+from app.workflow.models import WorkflowDecision
 
 
 class WorkflowManager:
@@ -15,78 +16,87 @@ class WorkflowManager:
         self.mode = mode
         self.manual_override = manual_override
 
+    def _build_context(self, history: list[dict[str, str]]) -> str:
+        if not history:
+            return ""
+        last_messages = history[-3:]
+        return " | ".join(item.get("content", "") for item in last_messages if item.get("content"))
+
+    def _command_decision(self, user_input: str, history: list[dict[str, str]]) -> WorkflowDecision | None:
+        text = user_input.strip().lower()
+        context = self._build_context(history)
+
+        if text == "/learning":
+            self.set_mode("learning", manual_override=True)
+            return WorkflowDecision(
+                mode="learning",
+                selected_mode="learning",
+                automation_mode="learning",
+                reasoning_box="white_box",
+                user_input=user_input,
+                system_message="Mode changed to learning.",
+                instruction="Explain in detail, step by step, with examples and clear structure.",
+                context=context,
+                strategy="explain",
+            )
+
+        if text == "/collaboration":
+            self.set_mode("collaboration", manual_override=True)
+            return WorkflowDecision(
+                mode="collaboration",
+                selected_mode="collaboration",
+                automation_mode="execution",
+                reasoning_box=self.select_reasoning_box(user_input, "collaboration"),
+                user_input=user_input,
+                system_message="Mode changed to collaboration.",
+                instruction="Help create, structure, and improve ideas with practical next steps.",
+                context=context,
+                strategy="act",
+            )
+
+        if text == "/auto":
+            self.set_mode("auto", manual_override=False)
+            decision = self.auto_mode.run(user_input)
+            decision.system_message = "Mode changed to auto. Luna will now choose the style automatically."
+            decision.context = context
+            return decision
+
+        return None
+
     def process(
         self,
         user_input: str,
         history: list[dict[str, str]] | None = None,
-    ) -> dict[str, str]:
+    ) -> dict[str, str | None]:
         history = history or []
-        text = user_input.strip().lower()
-
-        if text == "/learning":
-            self.set_mode("learning", manual_override=True)
-            return {
-                "mode": self.mode,
-                "selected_mode": self.mode,
-                "reasoning_box": "white_box",
-                "user_input": user_input,
-                "system_message": "Mode changed to learning.",
-                "instruction": (
-                    "Explain in detail, step by step, with examples and clear structure."
-                ),
-                "context": self.build_context(history),
-            }
-
-        if text == "/collaboration":
-            self.set_mode("collaboration", manual_override=True)
-            return {
-                "mode": self.mode,
-                "selected_mode": self.mode,
-                "reasoning_box": self.select_reasoning_box(user_input, "collaboration"),
-                "user_input": user_input,
-                "system_message": "Mode changed to collaboration.",
-                "instruction": (
-                    "Help create, structure, and improve ideas with practical next steps."
-                ),
-                "context": self.build_context(history),
-            }
-
-        if text == "/auto":
-            self.set_mode("auto", manual_override=False)
-            workflow_data = self.auto_mode.run(user_input)
-            workflow_data["mode"] = "auto"
-            workflow_data["reasoning_box"] = "black_box"
-            workflow_data["system_message"] = "Mode changed to auto. Luna will now choose the style automatically."
-            workflow_data["context"] = self.build_context(history)
-            return workflow_data
+        command_decision = self._command_decision(user_input, history)
+        if command_decision is not None:
+            return command_decision.to_dict()
 
         if self.manual_override:
             if self.mode == "learning":
-                workflow_data = self.learning.run(user_input)
+                decision = self.learning.run(user_input)
             elif self.mode == "collaboration":
-                workflow_data = self.collaboration.run(user_input)
+                decision = self.collaboration.run(user_input)
             else:
-                workflow_data = self.auto_mode.run(user_input)
-                workflow_data["mode"] = "auto"
+                decision = self.auto_mode.run(user_input)
         else:
             selected_mode = self.auto_mode.decide(user_input)
             if selected_mode == "learning":
-                workflow_data = self.learning.run(user_input)
+                decision = self.learning.run(user_input)
             elif selected_mode == "collaboration":
-                workflow_data = self.collaboration.run(user_input)
+                decision = self.collaboration.run(user_input)
             else:
-                workflow_data = self.auto_mode.run(user_input)
-            workflow_data["mode"] = "auto"
-            workflow_data["selected_mode"] = selected_mode
+                decision = self.auto_mode.run(user_input)
+            decision.selected_mode = selected_mode
 
-        workflow_data.setdefault("selected_mode", workflow_data.get("mode", "auto"))
-        workflow_data["reasoning_box"] = self.select_reasoning_box(
-            user_input,
-            workflow_data.get("selected_mode", "auto"),
-        )
-        workflow_data["system_message"] = None
-        workflow_data["context"] = self.build_context(history)
-        return workflow_data
+        decision.mode = "auto" if not self.manual_override else self.mode
+        if decision.selected_mode == "auto":
+            decision.selected_mode = decision.mode
+        decision.reasoning_box = self.select_reasoning_box(user_input, decision.selected_mode)
+        decision.system_message = None
+        decision.context = self._build_context(history)
+        return decision.to_dict()
 
     def select_reasoning_box(self, user_input: str, selected_mode: str) -> str:
         normalized = user_input.strip().lower()
@@ -119,9 +129,3 @@ class WorkflowManager:
             return "white_box"
 
         return "black_box"
-
-    def build_context(self, history: list[dict[str, str]]) -> str:
-        if not history:
-            return ""
-        last_messages = history[-3:]
-        return " | ".join(item["content"] for item in last_messages)

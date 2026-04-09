@@ -1,4 +1,4 @@
-﻿from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field
 import json
 from pathlib import Path
 from uuid import uuid4
@@ -57,12 +57,18 @@ class ProjectStore:
             for item in raw_projects:
                 if not isinstance(item, dict):
                     continue
-                project_id = item.get("id")
-                name = item.get("name")
-                brief = item.get("brief")
-                if not all(isinstance(value, str) for value in (project_id, name, brief)):
+                project_id_raw = item.get("id")
+                name_raw = item.get("name")
+                brief_raw = item.get("brief")
+                if not isinstance(project_id_raw, str):
                     continue
-
+                if not isinstance(name_raw, str):
+                    continue
+                if not isinstance(brief_raw, str):
+                    continue
+                project_id = project_id_raw
+                name = name_raw
+                brief = brief_raw
                 tasks = self._normalize_tasks(item.get("tasks", []))
                 memory_entries = self._normalize_string_list(item.get("memory_entries", []))
                 decisions = self._normalize_string_list(item.get("decisions", []))
@@ -263,3 +269,4 @@ class ProjectStore:
         self.current_project_id = project.id
         self.save()
         return project
+

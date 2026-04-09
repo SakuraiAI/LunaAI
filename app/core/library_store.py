@@ -59,22 +59,33 @@ class LibraryStore:
         for item in raw_entries:
             if not isinstance(item, dict):
                 continue
-            entry_id = item.get("id")
-            title = item.get("title")
-            kind = item.get("kind")
-            source = item.get("source")
-            content = item.get("content", "")
-            tags = item.get("tags", [])
-            if not all(isinstance(value, str) for value in (entry_id, title, kind, source)):
+            entry_id_raw = item.get("id")
+            title_raw = item.get("title")
+            kind_raw = item.get("kind")
+            source_raw = item.get("source")
+            content_raw = item.get("content", "")
+            tags_raw = item.get("tags", [])
+            if not isinstance(entry_id_raw, str):
                 continue
-            clean_tags = [tag.strip() for tag in tags if isinstance(tag, str) and tag.strip()]
+            if not isinstance(title_raw, str):
+                continue
+            if not isinstance(kind_raw, str):
+                continue
+            if not isinstance(source_raw, str):
+                continue
+            entry_id = entry_id_raw
+            title = title_raw.strip() or "Library item"
+            kind = kind_raw.strip() or "note"
+            source = source_raw.strip()
+            content = content_raw.strip() if isinstance(content_raw, str) else ""
+            clean_tags = [tag.strip() for tag in tags_raw if isinstance(tag, str) and tag.strip()]
             self.entries.append(
                 LibraryEntry(
                     id=entry_id,
-                    title=title.strip() or "Library item",
-                    kind=kind.strip() or "note",
-                    source=source.strip(),
-                    content=content.strip() if isinstance(content, str) else "",
+                    title=title,
+                    kind=kind,
+                    source=source,
+                    content=content,
                     tags=clean_tags[:8],
                 )
             )
@@ -231,4 +242,5 @@ class LibraryStore:
     def _preview(self, content: str) -> str:
         preview = " ".join(content.split())
         return preview[:120] + ("..." if len(preview) > 120 else "")
+
 

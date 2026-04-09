@@ -24,6 +24,12 @@ contextBridge.exposeInMainWorld('lunaDesktop', {
     download: (downloadUrl) => ipcRenderer.invoke('updates:download', downloadUrl),
   },
   luna: {
+    getState: () => ipcRenderer.invoke('luna:get-state'),
+    createChat: (title) => ipcRenderer.invoke('luna:create-chat', title),
+    switchChat: (chatId) => ipcRenderer.invoke('luna:switch-chat', chatId),
+    renameChat: (chatId, title) => ipcRenderer.invoke('luna:rename-chat', chatId, title),
+    deleteChat: (chatId) => ipcRenderer.invoke('luna:delete-chat', chatId),
+    sendMessage: (payload) => ipcRenderer.invoke('luna:send-message', payload),
     futureAction: (payload) => ipcRenderer.invoke('luna:future-action', payload),
   },
 });

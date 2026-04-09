@@ -268,6 +268,45 @@ function writeRuntimeSettings(nextSettings) {
   return normalized;
 }
 
+function getPythonExecutable() {
+  return process.env.LUNA_PYTHON || 'python';
+}
+
+function getLunaBridgePath() {
+  const appPath = app.getAppPath();
+  const cwd = process.cwd();
+  const candidates = [
+    path.join(appPath, 'app', 'api', 'electron_bridge.py'),
+    path.join(cwd, 'app', 'api', 'electron_bridge.py'),
+    path.join(path.dirname(appPath), 'app', 'api', 'electron_bridge.py'),
+  ];
+  for (const candidate of candidates) {
+    if (fs.existsSync(candidate)) return candidate;
+  }
+  return candidates[0];
+}
+
+function runLunaBridge(payload) {
+  try {
+    const raw = execFileSync(
+      getPythonExecutable(),
+      [getLunaBridgePath()],
+      {
+        input: JSON.stringify(payload || {}),
+        encoding: 'utf8',
+        windowsHide: true,
+        timeout: 180000,
+        cwd: process.cwd(),
+      },
+    ).trim();
+    return raw ? JSON.parse(raw) : { ok: false, message: 'Empty Luna bridge response.' };
+  } catch (error) {
+    const stderr = String(error?.stderr || '').trim();
+    const stdout = String(error?.stdout || '').trim();
+    return { ok: false, message: stderr || stdout || String(error) };
+  }
+}
+
 function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1600,
@@ -478,6 +517,30 @@ ipcMain.handle('updates:check', () => {
 ipcMain.handle('updates:download', (_, downloadUrl) => {
   const feed = buildUpdateFeed();
   return openUpdateDownload(String(downloadUrl || feed.downloadUrl || ''));
+});
+
+ipcMain.handle('luna:get-state', () => {
+  return runLunaBridge({ action: 'state' });
+});
+
+ipcMain.handle('luna:create-chat', (_, title) => {
+  return runLunaBridge({ action: 'create_chat', title: String(title || 'New chat') });
+});
+
+ipcMain.handle('luna:switch-chat', (_, chatId) => {
+  return runLunaBridge({ action: 'switch_chat', chatId: String(chatId || '') });
+});
+
+ipcMain.handle('luna:rename-chat', (_, chatId, title) => {
+  return runLunaBridge({ action: 'rename_chat', chatId: String(chatId || ''), title: String(title || '') });
+});
+
+ipcMain.handle('luna:delete-chat', (_, chatId) => {
+  return runLunaBridge({ action: 'delete_chat', chatId: String(chatId || '') });
+});
+
+ipcMain.handle('luna:send-message', (_, payload) => {
+  return runLunaBridge({ action: 'send_message', ...(payload || {}) });
 });
 
 ipcMain.handle('luna:future-action', async (_, payload) => {

@@ -143,8 +143,57 @@ def dedupe_preserve_order(items: list[str], *, normalizer=normalize_memory_entry
             break
     return output
 
+
+def _strip_internal_reasoning_leaks(text: str) -> str:
+    cleaned = text.strip()
+
+    final_match = re.search(r'(?:^|\n)(?:\*\*?|#+\s*)?(?:final\s+polish|final\s+answer|odpoved|finalni\s+odpoved)\s*[:\-]?\s*[\"]?(.+)', cleaned, re.IGNORECASE | re.DOTALL)
+    if final_match:
+        candidate = final_match.group(1).strip()
+        candidate = candidate.strip('"')
+        if candidate:
+            return candidate
+
+    leak_markers = (
+        '* User says',
+        '* Context:',
+        '* The user',
+        '* Persona:',
+        '* Language:',
+        '* Draft:',
+        '*Final Polish',
+        'Let''s look at',
+        'Wait, the prompt says',
+        'I should acknowledge',
+        'A good response would be',
+    )
+    if any(marker.lower() in cleaned.lower() for marker in leak_markers):
+        lines = [line.strip() for line in cleaned.splitlines() if line.strip()]
+        quoted_candidates: list[str] = []
+        plain_candidates: list[str] = []
+        for line in lines:
+            stripped = line.strip('*- ').strip()
+            if not stripped:
+                continue
+            if stripped.startswith('"') and stripped.endswith('"') and len(stripped) > 2:
+                quoted_candidates.append(stripped.strip('"'))
+                continue
+            if any(marker.lower() in stripped.lower() for marker in leak_markers):
+                continue
+            if stripped.lower().startswith(('user says', 'context:', 'the user', 'persona:', 'language:', 'draft:', 'final polish')):
+                continue
+            if len(stripped) <= 220:
+                plain_candidates.append(stripped)
+        for candidate in reversed(quoted_candidates):
+            if candidate:
+                return candidate
+        for candidate in reversed(plain_candidates):
+            if candidate and not candidate.startswith(('User:', 'Assistant:')):
+                return candidate
+
+    return cleaned
 def clean_model_response_text(text: str) -> str:
-    cleaned = repair_text(text).strip()
+    cleaned = _strip_internal_reasoning_leaks(repair_text(text).strip())
     for prefix in ("Assistant: ", "Luna: "):
         if cleaned.startswith(prefix):
             cleaned = cleaned.removeprefix(prefix).strip()
@@ -172,3 +221,5 @@ def clean_model_response_text(text: str) -> str:
     if removed_placeholder and "[unverified link removed]" in cleaned:
         cleaned += "\n\nI removed a placeholder link because it was not verified."
     return cleaned
+
+
