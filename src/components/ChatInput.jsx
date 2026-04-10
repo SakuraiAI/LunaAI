@@ -23,7 +23,7 @@ function VoiceIcon() {
   );
 }
 
-export default function ChatInput({ value, onChange, onSend, onAction, attachmentLabel, onClearAttachment, centered = false }) {
+export default function ChatInput({ value, onChange, onSend, onAction, attachment, onClearAttachment, centered = false }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const fileInputRef = useRef(null);
   const menuRef = useRef(null);
@@ -47,7 +47,7 @@ export default function ChatInput({ value, onChange, onSend, onAction, attachmen
     textareaRef.current.style.height = '0px';
     const nextHeight = Math.max(30, Math.min(textareaRef.current.scrollHeight, 144));
     textareaRef.current.style.height = `${nextHeight}px`;
-  }, [value, attachmentLabel, centered]);
+  }, [value, attachment?.name, centered]);
 
   function handleFileChange(event) {
     const file = event.target.files?.[0];
@@ -68,6 +68,8 @@ export default function ChatInput({ value, onChange, onSend, onAction, attachmen
       onSend();
     }
   }
+
+  const isImageAttachment = Boolean(attachment?.previewUrl && attachment?.type?.startsWith('image/'));
 
   return (
     <div className={`chat-input-shell ${centered ? 'is-centered' : ''}`}>
@@ -90,9 +92,10 @@ export default function ChatInput({ value, onChange, onSend, onAction, attachmen
       </div>
 
       <div className="chat-input-main">
-        {attachmentLabel && (
-          <div className="attachment-chip">
-            <span>{attachmentLabel}</span>
+        {attachment && (
+          <div className={`attachment-chip ${isImageAttachment ? 'is-image' : ''}`}>
+            {isImageAttachment && <img src={attachment.previewUrl} alt={attachment.name} className="attachment-preview" />}
+            <span>{attachment.name}</span>
             <button type="button" onClick={onClearAttachment} aria-label="Remove attachment">x</button>
           </div>
         )}

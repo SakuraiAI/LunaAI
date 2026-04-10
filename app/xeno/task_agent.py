@@ -182,7 +182,7 @@ class TaskAgent:
             "make folder",
             "python projekt",
             "web projekt",
-            "pyside projekt",
+            "electron projekt",
             "rewrite file",
             "append to file",
             "open workspace",

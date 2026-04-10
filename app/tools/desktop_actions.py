@@ -264,25 +264,43 @@ class DesktopActionTool:
         )
         return workspace
 
-    def create_pyside_project(self, project_name: str) -> Path:
+
+
+    def create_electron_project(self, project_name: str) -> Path:
         workspace = self.ensure_project_workspace(project_name)
-        self.create_folder(workspace / "app")
-        self.create_folder(workspace / "app" / "ui")
+        self.create_folder(workspace / "electron")
+        self.create_folder(workspace / "src")
+        self.create_folder(workspace / "src" / "components")
         self.create_files_batch(
             {
-                workspace / "main.py": (
-                    "import sys\n"
-                    "from PySide6.QtWidgets import QApplication, QLabel\n\n"
-                    "app = QApplication(sys.argv)\n"
-                    "label = QLabel('Hello from LunaAI')\n"
-                    "label.resize(360, 120)\n"
-                    "label.show()\n"
-                    "sys.exit(app.exec())\n"
+                workspace / "package.json": (
+                    "{\n"
+                    f'  "name": "{self._slugify(project_name)}",\n'
+                    '  "version": "0.1.0",\n'
+                    '  "private": true,\n'
+                    '  "main": "electron/main.js",\n'
+                    '  "scripts": {\n'
+                    '    "dev": "electron ."\n'
+                    '  }\n'
+                    "}\n"
                 ),
-                workspace / "requirements.txt": "PySide6\n",
-                workspace / "README.md": f"# {project_name}\n\nPySide6 project scaffold created by Luna.\n",
-                workspace / "app" / "__init__.py": "",
-                workspace / "app" / "ui" / "__init__.py": "",
+                workspace / "electron" / "main.js": (
+                    "const { app, BrowserWindow } = require('electron');\n\n"
+                    "function createWindow() {\n"
+                    "  const win = new BrowserWindow({ width: 1200, height: 800 });\n"
+                    "  win.loadFile('index.html');\n"
+                    "}\n\n"
+                    "app.whenReady().then(createWindow);\n"
+                ),
+                workspace / "index.html": (
+                    "<!doctype html>\n"
+                    '<html lang="en">\n'
+                    '<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>LunaAI Desktop</title></head>\n'
+                    '<body><div id="app">Hello from LunaAI Electron</div><script type="module" src="src/main.js"></script></body>\n'
+                    "</html>\n"
+                ),
+                workspace / "src" / "main.js": "console.log('Luna Electron project ready');\n",
+                workspace / "README.md": f"# {project_name}\n\nElectron desktop project scaffold created by Luna.\n",
             }
         )
         return workspace

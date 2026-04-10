@@ -25,7 +25,7 @@
   "cloud_root_path": "",
   "cloud_account_email": "",
   "cloud_auto_sync": false,
-  "cpu_limit_percent": 55,
-  "gpu_limit_percent": 60,
-  "memory_limit_percent": 50
+  "cpu_limit_percent": 35,
+  "gpu_limit_percent": 40,
+  "memory_limit_percent": 35
 }

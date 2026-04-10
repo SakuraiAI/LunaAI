@@ -43,7 +43,7 @@ class XenoPlanner:
             project_type = "creative_tech"
         elif any(token in normalized for token in ["website", "web app", "landing", "frontend", "backend", "api"]):
             project_type = "web"
-        elif any(token in normalized for token in ["desktop", "pyside", "qt", "windows app"]):
+        elif any(token in normalized for token in ["desktop", "electron", "react", "windows app"]):
             project_type = "desktop"
         elif any(token in normalized for token in ["research", "analyze", "vyzkum", "analyza", "research plan"]):
             project_type = "research"
@@ -71,7 +71,7 @@ class XenoPlanner:
         level = str(intelligence_level).strip()
 
         if project_type == "desktop":
-            stack = ["Python", "PySide6", "Local AI Model", "JSON Storage"]
+            stack = ["Electron", "React", "Python Backend", "JSON Storage"]
             if level == "5":
                 stack.append("Execution Log")
             return stack
@@ -101,7 +101,7 @@ class XenoPlanner:
             if level == "5":
                 stack.append("Permissions Layer")
             return stack
-        stack = ["Python", "Desktop UI", "Local AI Model"]
+        stack = ["Electron", "React", "Python Backend"]
         if level == "5":
             stack.append("Project Memory")
         return stack
@@ -126,7 +126,8 @@ class XenoPlanner:
             "app/models/",
             "app/tools/",
             "app/workflow/",
-            "app/ui/",
+            "electron/",
+            "src/",
             "app/xeno/",
             "data/chats/",
             "data/projects/",
@@ -140,14 +141,15 @@ class XenoPlanner:
             "main.py",
             "config/settings.py",
             "app/core/engine.py",
-            "app/ui/desktop_app.py",
+            "electron/main.js",
+            "src/App.jsx",
             "app/xeno/project_builder.py",
             "app/xeno/task_agent.py",
         ]
         if project_type == "web":
             core_files.extend(["app.py", "README.md"])
         elif project_type == "desktop":
-            core_files.extend(["app/ui/desktop_app.py", "requirements.txt"])
+            core_files.extend(["electron/main.js", "src/App.jsx", "package.json"])
         elif project_type == "research":
             core_files.extend(["docs/research_notes.md", "docs/findings.md"])
         if level == "5":

@@ -64,6 +64,8 @@ class LunaEngine:
         self.last_desktop_observation: dict[str, object] | None = None
         self.last_model_debug = ""
         self._last_support_model_source = "unused"
+        self._last_primary_model_source = "lm_studio"
+        self._last_primary_model_source = "lm_studio"
 
         try:
             timezone = ZoneInfo("Europe/Prague")
@@ -221,17 +223,53 @@ class LunaEngine:
             self._last_support_model_source = "lm_studio_fallback"
         return self.model.generate(messages)
 
+    def _is_local_model_failure(self, response: str) -> bool:
+        lowered = str(response or "").strip().lower()
+        failure_signals = [
+            "luna: lm studio is not reachable",
+            "luna: lm studio returned http",
+            "luna: lm studio accepted the connection but closed it without a response",
+            "luna: lm studio took too long to answer",
+            "luna: invalid response from local model",
+            "luna: unexpected local model error",
+        ]
+        return any(lowered.startswith(signal) for signal in failure_signals)
+
+    def _generate_primary_response(self, messages: list[dict[str, str]]) -> str:
+        self._last_primary_model_source = "lm_studio"
+        response = self.model.generate(messages)
+        if not self._is_local_model_failure(response):
+            return response
+        if not self.support_model.is_available():
+            self._last_primary_model_source = "lm_studio_error"
+            return response
+        try:
+            fallback_response = str(self.support_model.generate(messages) or "").strip()
+        except Exception:
+            self._last_primary_model_source = "lm_studio_error"
+            return response
+        if fallback_response:
+            self._last_primary_model_source = "nvidia_fallback"
+            return fallback_response
+        self._last_primary_model_source = "lm_studio_error"
+        return response
+
     def _build_model_debug_footer(self, *, xeno_consulted: bool) -> str:
         source_map = {
             "nvidia": "NVIDIA",
             "lm_studio_fallback": "LM Studio fallback",
             "unused": "nepouzito",
+            "lm_studio": "LM Studio",
+            "nvidia_fallback": "NVIDIA fallback",
+            "lm_studio_error": "LM Studio error",
         }
         support_source = source_map.get(self._last_support_model_source, self._last_support_model_source or "nepouzito")
+        primary_source = source_map.get(self._last_primary_model_source, self._last_primary_model_source or "LM Studio")
         consulted = "ano" if xeno_consulted else "ne"
         return (
             "[Model debug]\n"
             f"Luna model: {self.settings.lm_studio_model}\n"
+            f"Luna source: {primary_source}\n"
             f"Xeno model: {self.settings.nvidia_model}\n"
             f"Xeno consulted: {consulted}\n"
             f"Xeno source: {support_source}"
@@ -302,7 +340,7 @@ class LunaEngine:
             "- open files and folders",
             "- create folders and files",
             "- overwrite or append file content",
-            "- scaffold python, web, and pyside projects",
+            "- scaffold python, web, and electron projects",
             "- run agent task actions from project flow",
             "Registered task actions: " + ", ".join(item["action_key"] for item in self.desktop_actions.list_registered_actions()),
         ])
@@ -785,7 +823,7 @@ class LunaEngine:
         project_blueprints = [
             (r'(?:vytvor|vytvo?|udelej|ud\\?lej|create|make) python projekt (.+?)(?: a otevri ve vscode| and open in vscode)?$', "python"),
             (r'(?:vytvor|vytvo?|udelej|ud\\?lej|create|make) web projekt (.+?)(?: a otevri ve vscode| and open in vscode)?$', "web"),
-            (r'(?:vytvor|vytvo?|udelej|ud\\?lej|create|make) pyside projekt (.+?)(?: a otevri ve vscode| and open in vscode)?$', "pyside"),
+            (r'(?:vytvor|vytvo?|udelej|ud\\?lej|create|make) electron projekt (.+?)(?: a otevri ve vscode| and open in vscode)?$', "electron"),
         ]
         for pattern, kind in project_blueprints:
             match = re.search(pattern, normalized, flags=re.IGNORECASE)
@@ -801,8 +839,10 @@ class LunaEngine:
                     workspace = self.desktop_actions.create_python_project(project_name)
                 elif kind == "web":
                     workspace = self.desktop_actions.create_web_project(project_name)
+                elif kind == "electron":
+                    workspace = self.desktop_actions.create_electron_project(project_name)
                 else:
-                    workspace = self.desktop_actions.create_pyside_project(project_name)
+                    workspace = self.desktop_actions.create_electron_project(project_name)
                 if open_in_vscode:
                     vscode_message = self.desktop_actions.open_in_vscode(self.user_settings.data.vscode_path, workspace)
                     return f"Created {kind} project {workspace}. {vscode_message}."
@@ -1142,6 +1182,7 @@ class LunaEngine:
         self.memory_coordinator.remember_user_input(cleaned_input, selected_mode)
 
         self._last_support_model_source = "unused"
+        self._last_primary_model_source = "lm_studio"
         xeno_consulted = self.xeno.should_consult(workflow_data["user_input"])
         internet_context = self._internet_context(workflow_data["user_input"])
         hidden_support = self._hidden_xeno_support(workflow_data["user_input"])
@@ -1168,7 +1209,7 @@ class LunaEngine:
             intelligence_level=intelligence_level,
         )
 
-        response = self.model.generate(messages)
+        response = self._generate_primary_response(messages)
         if not str(response).strip():
             response = "Luna: Nic jsem z modelu nedostala. Zkus to prosim znovu."
         debug_footer = self._build_model_debug_footer(xeno_consulted=xeno_consulted)

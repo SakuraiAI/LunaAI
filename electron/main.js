@@ -287,24 +287,69 @@ function getLunaBridgePath() {
 }
 
 function runLunaBridge(payload) {
-  try {
-    const raw = execFileSync(
-      getPythonExecutable(),
-      [getLunaBridgePath()],
-      {
-        input: JSON.stringify(payload || {}),
-        encoding: 'utf8',
-        windowsHide: true,
-        timeout: 180000,
-        cwd: process.cwd(),
-      },
-    ).trim();
-    return raw ? JSON.parse(raw) : { ok: false, message: 'Empty Luna bridge response.' };
-  } catch (error) {
-    const stderr = String(error?.stderr || '').trim();
-    const stdout = String(error?.stdout || '').trim();
-    return { ok: false, message: stderr || stdout || String(error) };
-  }
+  return new Promise((resolve) => {
+    const child = spawn(getPythonExecutable(), [getLunaBridgePath()], {
+      cwd: process.cwd(),
+      windowsHide: true,
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
+
+    let stdout = '';
+    let stderr = '';
+    let settled = false;
+
+    const finish = (result) => {
+      if (settled) return;
+      settled = true;
+      resolve(result);
+    };
+
+    const timeoutId = setTimeout(() => {
+      try {
+        child.kill();
+      } catch {}
+      finish({ ok: false, message: 'Luna bridge timed out.' });
+    }, 180000);
+
+    child.stdout.setEncoding('utf8');
+    child.stderr.setEncoding('utf8');
+
+    child.stdout.on('data', (chunk) => {
+      stdout += chunk;
+    });
+
+    child.stderr.on('data', (chunk) => {
+      stderr += chunk;
+    });
+
+    child.on('error', (error) => {
+      clearTimeout(timeoutId);
+      finish({ ok: false, message: String(error) });
+    });
+
+    child.on('close', () => {
+      clearTimeout(timeoutId);
+      const raw = String(stdout || '').trim();
+      const err = String(stderr || '').trim();
+      if (!raw) {
+        finish({ ok: false, message: err || 'Empty Luna bridge response.' });
+        return;
+      }
+      try {
+        finish(JSON.parse(raw));
+      } catch {
+        finish({ ok: false, message: err || raw });
+      }
+    });
+
+    try {
+      child.stdin.write(JSON.stringify(payload || {}));
+      child.stdin.end();
+    } catch (error) {
+      clearTimeout(timeoutId);
+      finish({ ok: false, message: String(error) });
+    }
+  });
 }
 
 function createWindow() {
@@ -519,28 +564,28 @@ ipcMain.handle('updates:download', (_, downloadUrl) => {
   return openUpdateDownload(String(downloadUrl || feed.downloadUrl || ''));
 });
 
-ipcMain.handle('luna:get-state', () => {
-  return runLunaBridge({ action: 'state' });
+ipcMain.handle('luna:get-state', async () => {
+  return await runLunaBridge({ action: 'state' });
 });
 
-ipcMain.handle('luna:create-chat', (_, title) => {
-  return runLunaBridge({ action: 'create_chat', title: String(title || 'New chat') });
+ipcMain.handle('luna:create-chat', async (_, title) => {
+  return await runLunaBridge({ action: 'create_chat', title: String(title || 'New chat') });
 });
 
-ipcMain.handle('luna:switch-chat', (_, chatId) => {
-  return runLunaBridge({ action: 'switch_chat', chatId: String(chatId || '') });
+ipcMain.handle('luna:switch-chat', async (_, chatId) => {
+  return await runLunaBridge({ action: 'switch_chat', chatId: String(chatId || '') });
 });
 
-ipcMain.handle('luna:rename-chat', (_, chatId, title) => {
-  return runLunaBridge({ action: 'rename_chat', chatId: String(chatId || ''), title: String(title || '') });
+ipcMain.handle('luna:rename-chat', async (_, chatId, title) => {
+  return await runLunaBridge({ action: 'rename_chat', chatId: String(chatId || ''), title: String(title || '') });
 });
 
-ipcMain.handle('luna:delete-chat', (_, chatId) => {
-  return runLunaBridge({ action: 'delete_chat', chatId: String(chatId || '') });
+ipcMain.handle('luna:delete-chat', async (_, chatId) => {
+  return await runLunaBridge({ action: 'delete_chat', chatId: String(chatId || '') });
 });
 
-ipcMain.handle('luna:send-message', (_, payload) => {
-  return runLunaBridge({ action: 'send_message', ...(payload || {}) });
+ipcMain.handle('luna:send-message', async (_, payload) => {
+  return await runLunaBridge({ action: 'send_message', ...(payload || {}) });
 });
 
 ipcMain.handle('luna:future-action', async (_, payload) => {
