@@ -11,6 +11,7 @@ const isDev = !app.isPackaged;
 
 let mainWindow = null;
 let lastCpuSnapshot = captureCpuSnapshot();
+let pendingLunaAction = null;
 
 const defaultRuntimeSettings = {
   profile: 'balanced',
@@ -284,6 +285,42 @@ function getLunaBridgePath() {
     if (fs.existsSync(candidate)) return candidate;
   }
   return candidates[0];
+}
+
+
+function mergePendingLunaAction(result) {
+  if (!result || typeof result !== 'object') return result;
+  if (pendingLunaAction) {
+    return {
+      ...result,
+      pendingAction: {
+        active: true,
+        title: pendingLunaAction.title || 'Luna ceka na potvrzeni akce.',
+      },
+    };
+  }
+  return {
+    ...result,
+    pendingAction: {
+      active: false,
+      title: '',
+      ...(result.pendingAction || {}),
+    },
+  };
+}
+
+async function runLunaChatAction(payload) {
+  const result = await runLunaBridge(payload);
+  const pendingTitle = String(result?.pendingAction?.title || '').trim();
+  if (result?.ok && result?.pendingAction?.active) {
+    pendingLunaAction = {
+      payload,
+      title: pendingTitle || String(result?.response || '').trim() || 'Luna ceka na potvrzeni akce.',
+    };
+  } else if (!result?.pendingAction?.active) {
+    pendingLunaAction = null;
+  }
+  return mergePendingLunaAction(result);
 }
 
 function runLunaBridge(payload) {
@@ -565,27 +602,43 @@ ipcMain.handle('updates:download', (_, downloadUrl) => {
 });
 
 ipcMain.handle('luna:get-state', async () => {
-  return await runLunaBridge({ action: 'state' });
+  return mergePendingLunaAction(await runLunaBridge({ action: 'state' }));
 });
 
 ipcMain.handle('luna:create-chat', async (_, title) => {
-  return await runLunaBridge({ action: 'create_chat', title: String(title || 'New chat') });
+  pendingLunaAction = null;
+  return mergePendingLunaAction(await runLunaBridge({ action: 'create_chat', title: String(title || 'New chat') }));
 });
 
 ipcMain.handle('luna:switch-chat', async (_, chatId) => {
-  return await runLunaBridge({ action: 'switch_chat', chatId: String(chatId || '') });
+  return mergePendingLunaAction(await runLunaBridge({ action: 'switch_chat', chatId: String(chatId || '') }));
 });
 
 ipcMain.handle('luna:rename-chat', async (_, chatId, title) => {
-  return await runLunaBridge({ action: 'rename_chat', chatId: String(chatId || ''), title: String(title || '') });
+  return mergePendingLunaAction(await runLunaBridge({ action: 'rename_chat', chatId: String(chatId || ''), title: String(title || '') }));
 });
 
 ipcMain.handle('luna:delete-chat', async (_, chatId) => {
-  return await runLunaBridge({ action: 'delete_chat', chatId: String(chatId || '') });
+  pendingLunaAction = null;
+  return mergePendingLunaAction(await runLunaBridge({ action: 'delete_chat', chatId: String(chatId || '') }));
 });
 
 ipcMain.handle('luna:send-message', async (_, payload) => {
-  return await runLunaBridge({ action: 'send_message', ...(payload || {}) });
+  return await runLunaChatAction({ action: 'send_message', ...(payload || {}) });
+});
+
+ipcMain.handle('luna:confirm-pending-action', async () => {
+  if (!pendingLunaAction?.payload) {
+    return mergePendingLunaAction(await runLunaBridge({ action: 'state' }));
+  }
+  const replayPayload = { ...pendingLunaAction.payload, forceActionExecution: true };
+  pendingLunaAction = null;
+  return await runLunaChatAction({ action: 'send_message', ...replayPayload });
+});
+
+ipcMain.handle('luna:cancel-pending-action', async () => {
+  pendingLunaAction = null;
+  return mergePendingLunaAction(await runLunaBridge({ action: 'state' }));
 });
 
 ipcMain.handle('luna:future-action', async (_, payload) => {

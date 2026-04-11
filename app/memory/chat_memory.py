@@ -77,7 +77,11 @@ class ChatMemory:
             role = item.get("role")
             content = item.get("content")
             if isinstance(role, str) and isinstance(content, str):
-                history.append({"role": role, "content": repair_text(content)})
+                entry = {"role": role, "content": repair_text(content)}
+                author = item.get("author")
+                if isinstance(author, str) and author.strip():
+                    entry["author"] = repair_text(author).strip()
+                history.append(entry)
         return history
 
     def _persist(self) -> None:
@@ -111,9 +115,12 @@ class ChatMemory:
             title = title[:35].rstrip() + "..."
         self.titles[self.current_session_id] = title
 
-    def save_message(self, role: str, message: str) -> None:
+    def save_message(self, role: str, message: str, author: str | None = None) -> None:
         self._ensure_session(self.current_session_id)
         entry = {"role": role, "content": repair_text(message)}
+        clean_author = repair_text(author or "").strip()
+        if clean_author:
+            entry["author"] = clean_author
         self.sessions[self.current_session_id].append(entry)
         self.history = list(self.sessions[self.current_session_id])
         if role == "user":
@@ -124,10 +131,10 @@ class ChatMemory:
         return list(self.history)
 
     def add_user_message(self, message: str) -> None:
-        self.save_message("user", message)
+        self.save_message("user", message, author="You")
 
-    def add_assistant_message(self, message: str) -> None:
-        self.save_message("assistant", message)
+    def add_assistant_message(self, message: str, author: str = "Luna") -> None:
+        self.save_message("assistant", message, author=author)
 
     def clear(self) -> None:
         self.sessions[self.current_session_id] = []

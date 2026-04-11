@@ -60,6 +60,7 @@ class LunaEngine:
         self.system_control = SystemControlLayer()
         self.system_control.apply_profile(self.user_settings.data, self.user_settings.data.system_control_profile)
         self.pending_action: tuple[str, str, Callable[[], str]] | None = None
+        self._action_mode_override: str | None = None
         self.observe_mode_enabled = False
         self.last_desktop_observation: dict[str, object] | None = None
         self.last_model_debug = ""
@@ -275,7 +276,36 @@ class LunaEngine:
             f"Xeno source: {support_source}"
         )
 
+    def _requested_speaker(self, user_input: str) -> str | None:
+        normalized = str(user_input or "").strip().lower()
+        if not normalized:
+            return None
+        if re.search(r"\blun(a|o|ai)\b", normalized):
+            return "Luna"
+        if re.search(r"\bxeno(ai)?\b", normalized):
+            return "Xeno"
+        return None
+
+    def _current_conversation_speaker(self) -> str:
+        history = self.memory.load_history()
+        for item in reversed(history):
+            if str(item.get("role", "")).strip().lower() != "assistant":
+                continue
+            author = str(item.get("author", "")).strip()
+            if author in {"Luna", "Xeno"}:
+                return author
+        return "Luna"
+
+    def _response_author(self, user_input: str, *, xeno_consulted: bool) -> str:
+        requested_speaker = self._requested_speaker(user_input)
+        if requested_speaker is not None:
+            return requested_speaker
+        return self._current_conversation_speaker()
+
     def _action_mode(self) -> str:
+        override = str(self._action_mode_override or "").strip().lower()
+        if override in {"ask", "auto", "block"}:
+            return override
         mode = str(self.user_settings.data.agent_execution_mode or "ask").strip().lower()
         if mode not in {"ask", "auto", "block"}:
             return "ask"
@@ -1214,8 +1244,9 @@ class LunaEngine:
             response = "Luna: Nic jsem z modelu nedostala. Zkus to prosim znovu."
         debug_footer = self._build_model_debug_footer(xeno_consulted=xeno_consulted)
         self.last_model_debug = debug_footer
-        response = f"{str(response).rstrip()}\n\n---\n{debug_footer}"
-        self.memory_coordinator.save_exchange(cleaned_input, response)
+        response = str(response).rstrip()
+        response_author = self._response_author(workflow_data["user_input"], xeno_consulted=xeno_consulted)
+        self.memory_coordinator.save_exchange(cleaned_input, response, assistant_author=response_author)
         self._remember_project_chat_focus(cleaned_input, response)
         return response
 

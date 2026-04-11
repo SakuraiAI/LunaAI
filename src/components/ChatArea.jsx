@@ -41,7 +41,21 @@ function ThinkingPanel({ thinkingState }) {
   );
 }
 
-export default function ChatArea({ messages, chatId = '', thinkingState = null, revealingMessage = null }) {
+
+function PendingActionPanel({ pendingAction, onConfirmPendingAction, onCancelPendingAction }) {
+  if (!pendingAction?.active) return null;
+
+  return (
+    <div className="pending-action-panel" aria-live="polite" aria-label={pendingAction.title || 'Luna ceka na potvrzeni akce.'}>
+      <div className="pending-action-buttons is-centered">
+        <button type="button" className="secondary-button" onClick={onCancelPendingAction}>Cancel</button>
+        <button type="button" className="primary-button" onClick={onConfirmPendingAction}>Accept</button>
+      </div>
+    </div>
+  );
+}
+
+export default function ChatArea({ messages, chatId = '', thinkingState = null, revealingMessage = null, pendingAction = null, onConfirmPendingAction = null, onCancelPendingAction = null }) {
   const hasMessages = messages.length > 0;
   const messagesPanelRef = useRef(null);
   const messagesEndRef = useRef(null);
@@ -86,18 +100,18 @@ export default function ChatArea({ messages, chatId = '', thinkingState = null, 
   return (
     <section className="chat-workspace is-live">
       <div className={`hero-panel ${hasMessages ? 'is-compact' : ''}`}>
-        <div className="hero-core-stack">
-          <Orb3D />
-          <div className="hero-core-label">AI Core</div>
+        <div className="hero-node hero-node-left">
+          <span className="hero-node-eyebrow">Visible interface</span>
+          <span className="hero-node-label">LunaAI</span>
         </div>
-        <div className="hero-copy">
-          <h2>LunaAI</h2>
-          <p>System conversation remains calm, contextual, and action-ready across visible and hidden layers.</p>
-          <div className="hero-signal-row">
-            <span>Luna online</span>
-            <span>Xeno linked</span>
-            <span>Local bridge ready</span>
-          </div>
+        <div className="hero-center-orb">
+          <span className="hero-connector hero-connector-left" aria-hidden="true" />
+          <Orb3D />
+          <span className="hero-connector hero-connector-right" aria-hidden="true" />
+        </div>
+        <div className="hero-node hero-node-right">
+          <span className="hero-node-eyebrow">Reasoning layer</span>
+          <span className="hero-node-label">XenoAI</span>
         </div>
       </div>
 
@@ -105,20 +119,25 @@ export default function ChatArea({ messages, chatId = '', thinkingState = null, 
         <ThinkingPanel thinkingState={thinkingState} />
         {messages.map((message) => (
           <article key={message.id} className={`message-row ${message.role === 'user' ? 'is-user' : 'is-assistant'}`}>
-            <div className={`message-bubble ${message.role === 'user' ? 'is-user' : 'is-assistant'}`}>
-              <span className="message-author">{message.author}</span>
+            <div className={`message-bubble ${message.role === 'user' ? 'is-user' : 'is-assistant'} ${message.author === 'Xeno' ? 'is-xeno' : ''}`}>
+              <span className={`message-author ${message.author === 'Xeno' ? 'is-xeno' : ''}`}>{message.author}</span>
               <p>{message.content}</p>
             </div>
           </article>
         ))}
         {revealingMessage?.content ? (
           <article className="message-row is-assistant">
-            <div className="message-bubble is-assistant is-revealing">
-              <span className="message-author">{revealingMessage.author || 'Luna'}</span>
+            <div className={`message-bubble is-assistant is-revealing ${(revealingMessage.author || 'Luna') === 'Xeno' ? 'is-xeno' : ''}`}>
+              <span className={`message-author ${(revealingMessage.author || 'Luna') === 'Xeno' ? 'is-xeno' : ''}`}>{revealingMessage.author || 'Luna'}</span>
               <p>{revealingMessage.content}<span className="typing-caret" /></p>
             </div>
           </article>
         ) : null}
+        <PendingActionPanel
+          pendingAction={pendingAction}
+          onConfirmPendingAction={onConfirmPendingAction}
+          onCancelPendingAction={onCancelPendingAction}
+        />
         <div ref={messagesEndRef} />
       </div>
     </section>

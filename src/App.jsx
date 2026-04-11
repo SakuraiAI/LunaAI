@@ -157,6 +157,7 @@ export default function App() {
   const [chatBusy, setChatBusy] = useState(false);
   const [thinkingState, setThinkingState] = useState({ visible: false, xenoActive: false });
   const [revealingMessage, setRevealingMessage] = useState(null);
+  const [pendingAction, setPendingAction] = useState({ active: false, title: '' });
   const revealTimerRef = useRef(null);
 
   const profileName = signedInAs ? signedInAs.split('@')[0] : 'Sakurai Haise';
@@ -275,6 +276,10 @@ export default function App() {
     if (typeof result.currentChatId === 'string') {
       setCurrentChatId(result.currentChatId);
     }
+    setPendingAction({
+      active: Boolean(result?.pendingAction?.active),
+      title: String(result?.pendingAction?.title || ''),
+    });
     if (Array.isArray(overrideMessages) && typeof result.currentChatId === 'string') {
       setChatMessages((current) => ({
         ...current,
@@ -405,27 +410,8 @@ export default function App() {
       setThinkingState({ visible: true, xenoActive: shouldConsultXeno(baseText) });
       try {
         const result = await api.sendMessage({ chatId: activeChatId, text: decoratedText });
-        if (result?.ok) {
-          const backendMessages = Array.isArray(result.messages) ? result.messages : [];
-          const lastBackendMessage = backendMessages[backendMessages.length - 1];
-          const canRevealAssistant = lastBackendMessage?.role === 'assistant' && String(lastBackendMessage.content || '').trim();
-
-          if (canRevealAssistant) {
-            applyChatState(result, backendMessages.slice(0, -1));
-            setThinkingState({ visible: false, xenoActive: false });
-            startAssistantReveal({
-              chatId: result.currentChatId || activeChatId,
-              author: lastBackendMessage.author || 'Luna',
-              fullText: lastBackendMessage.content,
-              commit: () => {
-                applyBackendChatState(result);
-                setStatus('Luna backend replied.');
-              },
-            });
-          } else {
-            applyBackendChatState(result);
-            setStatus('Luna backend replied.');
-          }
+        if (handleBackendResponseResult(result, 'Luna backend replied.')) {
+          // handled above
         } else {
           appendMessages(activeChatId, [
             { id: `user-${Date.now()}`, role: 'user', author: 'You', content: decoratedText },
@@ -462,11 +448,16 @@ export default function App() {
       setThinkingState({ visible: false, xenoActive: false });
       startAssistantReveal({
         chatId: activeChatId,
-        author: 'Luna',
+        author: /\bxeno(ai)?\b/i.test(baseText) || shouldConsultXeno(baseText) ? 'Xeno' : 'Luna',
         fullText: fallbackResponse,
         commit: () => {
           appendMessages(activeChatId, [
-            { id: `assistant-${Date.now() + 1}`, role: 'assistant', author: 'Luna', content: fallbackResponse },
+            {
+              id: `assistant-${Date.now() + 1}`,
+              role: 'assistant',
+              author: /\bxeno(ai)?\b/i.test(baseText) || shouldConsultXeno(baseText) ? 'Xeno' : 'Luna',
+              content: fallbackResponse,
+            },
           ]);
           setStatus('Message routed through the LunaAI renderer shell.');
         },
@@ -490,6 +481,68 @@ export default function App() {
     setAttachment(null);
     setPendingGenerationType('');
     setPage('chat');
+  }
+
+
+  function handleBackendResponseResult(result, successStatus) {
+    if (!result?.ok) {
+      setStatus(result?.message || 'Luna backend did not return a valid reply.');
+      return false;
+    }
+
+    const backendMessages = Array.isArray(result.messages) ? result.messages : [];
+    const lastBackendMessage = backendMessages[backendMessages.length - 1];
+    const canRevealAssistant = lastBackendMessage?.role === 'assistant' && String(lastBackendMessage.content || '').trim();
+
+    if (canRevealAssistant) {
+      applyChatState(result, backendMessages.slice(0, -1));
+      setThinkingState({ visible: false, xenoActive: false });
+      startAssistantReveal({
+        chatId: result.currentChatId || currentChatId,
+        author: lastBackendMessage.author || 'Luna',
+        fullText: lastBackendMessage.content,
+        commit: () => {
+          applyBackendChatState(result);
+          setStatus(successStatus);
+        },
+      });
+      return true;
+    }
+
+    applyBackendChatState(result);
+    setStatus(successStatus);
+    return true;
+  }
+
+  async function handlePendingActionDecision(kind) {
+    const api = window.lunaDesktop?.luna;
+    if (!api) return;
+
+    setChatBusy(true);
+    setThinkingState({ visible: true, xenoActive: false });
+    try {
+      const result = kind === 'confirm'
+        ? await api.confirmPendingAction()
+        : await api.cancelPendingAction();
+      const handled = handleBackendResponseResult(result, kind === 'confirm' ? 'Akce byla potvrzena.' : 'Akce byla zrusena.');
+      if (kind === 'cancel' && handled) {
+        const backendMessages = Array.isArray(result?.messages) ? result.messages : [];
+        const lastBackendMessage = backendMessages[backendMessages.length - 1];
+        if (lastBackendMessage?.role !== 'assistant') {
+          const targetChatId = result?.currentChatId || currentChatId;
+          appendMessages(targetChatId, [
+            { id: `assistant-${Date.now()}`, role: 'assistant', author: 'Luna', content: 'Luna: Akci jsem zrusila.' },
+          ]);
+        }
+      }
+    } catch {
+      setStatus(kind === 'confirm' ? 'Potvrzeni akce selhalo.' : 'Zruseni akce selhalo.');
+    } finally {
+      setChatBusy(false);
+      if (!revealingMessage) {
+        setThinkingState((current) => (current.visible ? { visible: false, xenoActive: false } : current));
+      }
+    }
   }
 
   async function handleWindowAction(action) {
@@ -921,7 +974,15 @@ export default function App() {
 
       return (
         <div className={`chat-page ${isEmptyChat ? 'is-empty' : ''}`}>
-          <ChatArea messages={messages} chatId={currentChatId} thinkingState={thinkingState} revealingMessage={revealingMessage?.chatId === currentChatId ? revealingMessage : null} />
+          <ChatArea
+            messages={messages}
+            chatId={currentChatId}
+            thinkingState={thinkingState}
+            revealingMessage={revealingMessage?.chatId === currentChatId ? revealingMessage : null}
+            pendingAction={pendingAction}
+            onConfirmPendingAction={() => handlePendingActionDecision('confirm')}
+            onCancelPendingAction={() => handlePendingActionDecision('cancel')}
+          />
           <ChatInput
             value={composer}
             onChange={setComposer}

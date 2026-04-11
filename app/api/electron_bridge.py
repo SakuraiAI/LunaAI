@@ -12,8 +12,12 @@ if str(ROOT) not in sys.path:
 from app.core.engine import LunaEngine
 
 
-def _message_author(role: str) -> str:
-    return "You" if role == "user" else "Luna"
+def _message_author(item: dict[str, str]) -> str:
+    role = str(item.get("role", "assistant") or "assistant")
+    if role == "user":
+        return "You"
+    author = str(item.get("author", "") or "").strip()
+    return author or "Luna"
 
 
 def _serialize_history(history: list[dict[str, str]]) -> list[dict[str, str]]:
@@ -24,7 +28,7 @@ def _serialize_history(history: list[dict[str, str]]) -> list[dict[str, str]]:
         items.append({
             "id": f"msg-{index}",
             "role": role,
-            "author": _message_author(role),
+            "author": _message_author(item),
             "content": content,
         })
     return items
@@ -49,11 +53,17 @@ def _state(engine: LunaEngine) -> dict[str, Any]:
     current_chat_id = engine.get_current_chat_id()
     chats = _serialize_chats(engine.list_chats(), current_chat_id)
     messages = _serialize_history(engine.memory.load_history())
+    pending_title = engine.get_pending_action_title()
+    pending_action = {
+        "active": bool(pending_title),
+        "title": pending_title,
+    }
     return {
         "ok": True,
         "currentChatId": current_chat_id,
         "chats": chats,
         "messages": messages,
+        "pendingAction": pending_action,
     }
 
 
@@ -91,9 +101,26 @@ def main() -> int:
     elif action == "send_message":
         chat_id = str(payload.get("chatId", "") or "")
         text = str(payload.get("text", "") or "")
+        force_action_execution = bool(payload.get("forceActionExecution", False))
         if chat_id:
             engine.switch_chat(chat_id)
-        response = engine.chat(text)
+        original_mode = engine.user_settings.data.agent_execution_mode
+        original_override = engine._action_mode_override
+        if force_action_execution:
+            engine._action_mode_override = "auto"
+        try:
+            response = engine.chat(text)
+        finally:
+            engine.user_settings.data.agent_execution_mode = original_mode
+            engine._action_mode_override = original_override
+        result = _state(engine)
+        result["response"] = response
+    elif action == "confirm_pending_action":
+        response = engine.confirm_pending_action()
+        result = _state(engine)
+        result["response"] = response
+    elif action == "cancel_pending_action":
+        response = engine.cancel_pending_action()
         result = _state(engine)
         result["response"] = response
     else:

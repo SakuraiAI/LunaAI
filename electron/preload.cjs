@@ -30,6 +30,8 @@ contextBridge.exposeInMainWorld('lunaDesktop', {
     renameChat: (chatId, title) => ipcRenderer.invoke('luna:rename-chat', chatId, title),
     deleteChat: (chatId) => ipcRenderer.invoke('luna:delete-chat', chatId),
     sendMessage: (payload) => ipcRenderer.invoke('luna:send-message', payload),
+    confirmPendingAction: () => ipcRenderer.invoke('luna:confirm-pending-action'),
+    cancelPendingAction: () => ipcRenderer.invoke('luna:cancel-pending-action'),
     futureAction: (payload) => ipcRenderer.invoke('luna:future-action', payload),
   },
 });

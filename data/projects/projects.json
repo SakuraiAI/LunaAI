@@ -72,8 +72,8 @@
         }
       ],
       "memory_entries": [
-        "Luna direction: Rozumím, pokud to byla jen otázka a žádná akce není potřeba. Když budeš potřebovat skutečně něco udělat – třeba připravit workspace, vytvořit složku nebo napsat...",
-        "Chat focus: to byla jenom otazka",
+        "Luna direction: Ano, komunikujeme. V rámci platformy vyměňujeme informace a koordinujeme činnost – já dostávám tvůj vstup, předávám jej Xeno k analýze a plánování, a ona mi vra...",
+        "Chat focus: Takze spolu mezi sebou komunikujete",
         "Agent action: Observe the active workspace state -> Luna desktop observation:\nActive window: Grioten, xlout - ADRENALINA // SPEED UP | YouTube Music - Google Chrome\nApp: Web browser\nProcess: chrome.exe (PID 12528)\nMeaning: watching or browsing YouTube\nMouse position: 1848, 836\nScreen size: 2560x1440\nDetected context: youtube\nDesktop observation captured.",
         "Desktop observe: Web browser -> watching or browsing YouTube | Grioten, xlout - ADRENALINA // SPEED UP | YouTube Music - Google Chrome",
         "Agent handoff: Agent handoff ready: Lock the first milestone. Immediate action: Agent can immediately prepare a clean scope document for review. Queued after that: Map the execution path | Prepare local workspace | Build the first working slice",
