@@ -3,6 +3,26 @@ import Orb3D from './Orb3D';
 
 function ThinkingPanel({ thinkingState }) {
   if (!thinkingState?.visible) return null;
+  const lunaThinking = thinkingState?.lunaActive ?? !thinkingState?.xenoActive;
+  const xenoThinking = Boolean(thinkingState?.xenoActive);
+  const tracks = Array.isArray(thinkingState?.tracks) && thinkingState.tracks.length
+    ? thinkingState.tracks
+    : [
+        ...(lunaThinking
+          ? [{
+              speaker: 'Luna',
+              title: 'Luna',
+              note: 'Analyzuje zadani a sklada odpoved.',
+            }]
+          : []),
+        ...(xenoThinking
+          ? [{
+              speaker: 'Xeno',
+              title: 'Xeno',
+              note: 'Prochazi souvislosti, rizika a hloubejsi navrh.',
+            }]
+          : []),
+      ];
 
   return (
     <div className="thinking-panel" aria-live="polite">
@@ -11,22 +31,11 @@ function ThinkingPanel({ thinkingState }) {
         <strong>System activity</strong>
       </div>
       <div className="thinking-track-list">
-        <div className="thinking-track">
-          <div className="thinking-track-copy">
-            <span>Luna</span>
-            <strong>Analyzuje zadani a sklada odpoved.</strong>
-          </div>
-          <div className="thinking-bars" aria-hidden="true">
-            <span />
-            <span />
-            <span />
-          </div>
-        </div>
-        {thinkingState.xenoActive ? (
-          <div className="thinking-track is-xeno">
+        {tracks.map((track, index) => (
+          <div key={`${track.speaker}-${index}`} className={`thinking-track ${track.speaker === 'Xeno' ? 'is-xeno' : ''}`}>
             <div className="thinking-track-copy">
-              <span>Xeno</span>
-              <strong>Prochazi souvislosti, rizika a hloubejsi navrh.</strong>
+              <span>{track.title || track.speaker}</span>
+              <strong>{track.note}</strong>
             </div>
             <div className="thinking-bars" aria-hidden="true">
               <span />
@@ -34,7 +43,7 @@ function ThinkingPanel({ thinkingState }) {
               <span />
             </div>
           </div>
-        ) : null}
+        ))}
       </div>
       <p>Do chatu se ulozi jen finalni odpoved.</p>
     </div>
@@ -59,6 +68,15 @@ export default function ChatArea({ messages, chatId = '', thinkingState = null, 
   const hasMessages = messages.length > 0;
   const messagesPanelRef = useRef(null);
   const messagesEndRef = useRef(null);
+  const lunaThinking = Boolean(thinkingState?.visible && (thinkingState?.lunaActive ?? !thinkingState?.xenoActive));
+  const xenoThinking = Boolean(thinkingState?.visible && thinkingState?.xenoActive);
+  const heroThinkingClass = lunaThinking && xenoThinking
+    ? 'is-dual-thinking'
+    : lunaThinking
+      ? 'is-luna-thinking'
+      : xenoThinking
+        ? 'is-xeno-thinking'
+        : '';
 
   useEffect(() => {
     if (!hasMessages && !revealingMessage?.content) return;
@@ -78,7 +96,7 @@ export default function ChatArea({ messages, chatId = '', thinkingState = null, 
       window.cancelAnimationFrame(frame);
       window.clearTimeout(timeout);
     };
-  }, [hasMessages, messages.length, chatId, thinkingState?.visible, revealingMessage?.content?.length]);
+  }, [hasMessages, messages.length, chatId, thinkingState?.visible, thinkingState?.lunaActive, thinkingState?.xenoActive, revealingMessage?.content?.length]);
 
   if (!hasMessages && !revealingMessage?.content) {
     return (
@@ -99,17 +117,17 @@ export default function ChatArea({ messages, chatId = '', thinkingState = null, 
 
   return (
     <section className="chat-workspace is-live">
-      <div className={`hero-panel ${hasMessages ? 'is-compact' : ''}`}>
-        <div className="hero-node hero-node-left">
+      <div className={`hero-panel ${hasMessages ? 'is-compact' : ''} ${heroThinkingClass}`}>
+        <div className={`hero-node hero-node-left ${lunaThinking ? 'is-active' : ''} ${xenoThinking ? 'is-dual-active' : ''}`}>
           <span className="hero-node-eyebrow">Visible interface</span>
           <span className="hero-node-label">LunaAI</span>
         </div>
-        <div className="hero-center-orb">
-          <span className="hero-connector hero-connector-left" aria-hidden="true" />
+        <div className={`hero-center-orb ${heroThinkingClass}`}>
+          <span className={`hero-connector hero-connector-left ${lunaThinking ? 'is-active' : ''} ${xenoThinking ? 'is-dual-active' : ''}`} aria-hidden="true" />
           <Orb3D />
-          <span className="hero-connector hero-connector-right" aria-hidden="true" />
+          <span className={`hero-connector hero-connector-right ${xenoThinking ? 'is-active is-dual-active' : ''}`} aria-hidden="true" />
         </div>
-        <div className="hero-node hero-node-right">
+        <div className={`hero-node hero-node-right ${xenoThinking ? 'is-active is-dual-active' : ''}`}>
           <span className="hero-node-eyebrow">Reasoning layer</span>
           <span className="hero-node-label">XenoAI</span>
         </div>

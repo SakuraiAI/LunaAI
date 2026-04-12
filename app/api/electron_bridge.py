@@ -3,13 +3,35 @@ from __future__ import annotations
 import json
 import sys
 from pathlib import Path
-from typing import Any
+from typing import Any, Protocol, cast
 
 ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from app.core.engine import LunaEngine
+
+
+class _StdoutWithReconfigure(Protocol):
+    def reconfigure(self, *, encoding: str) -> object: ...
+
+
+class _BridgeEngine(Protocol):
+    memory: Any
+    user_settings: Any
+    _action_mode_override: str | None
+
+    def get_current_chat_id(self) -> str: ...
+    def list_chats(self) -> list[dict[str, str]]: ...
+    def get_pending_action_title(self) -> str: ...
+    def create_new_chat(self, title: str = "New chat") -> str: ...
+    def switch_chat(self, session_id: str) -> list[dict[str, str]]: ...
+    def rename_chat(self, session_id: str, title: str) -> str: ...
+    def delete_chat(self, session_id: str) -> str: ...
+    def chat(self, user_input: str) -> str: ...
+    def confirm_pending_action(self) -> str: ...
+    def cancel_pending_action(self) -> str: ...
+    def get_last_coordination(self) -> dict[str, Any]: ...
 
 
 def _message_author(item: dict[str, str]) -> str:
@@ -49,7 +71,7 @@ def _serialize_chats(chats: list[dict[str, str]], current_chat_id: str) -> list[
     return items
 
 
-def _state(engine: LunaEngine) -> dict[str, Any]:
+def _state(engine: _BridgeEngine) -> dict[str, Any]:
     current_chat_id = engine.get_current_chat_id()
     chats = _serialize_chats(engine.list_chats(), current_chat_id)
     messages = _serialize_history(engine.memory.load_history())
@@ -64,18 +86,20 @@ def _state(engine: LunaEngine) -> dict[str, Any]:
         "chats": chats,
         "messages": messages,
         "pendingAction": pending_action,
+        "coordination": engine.get_last_coordination(),
     }
 
 
 def main() -> int:
     try:
-        sys.stdout.reconfigure(encoding="utf-8")
+        if hasattr(sys.stdout, "reconfigure"):
+            cast(_StdoutWithReconfigure, sys.stdout).reconfigure(encoding="utf-8")
     except Exception:
         pass
     raw = sys.stdin.read().strip()
     payload = json.loads(raw) if raw else {}
     action = str(payload.get("action", "state") or "state").strip().lower()
-    engine = LunaEngine()
+    engine = cast(_BridgeEngine, LunaEngine())
 
     if action == "state":
         result = _state(engine)

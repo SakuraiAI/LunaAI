@@ -27,9 +27,42 @@ class NvidiaModel(BaseModel):
         self.timeout_seconds = timeout_seconds
         self.reasoning_budget = reasoning_budget
         self.enable_thinking = enable_thinking
+        self.runtime_cpu_limit_percent = 100
+        self.runtime_gpu_limit_percent = 100
+        self.runtime_memory_limit_percent = 100
 
     def is_available(self) -> bool:
         return bool(OpenAI is not None and self.api_token and self.model)
+
+    def configure_runtime_limits(
+        self,
+        cpu_limit_percent: int = 100,
+        gpu_limit_percent: int = 100,
+        memory_limit_percent: int = 100,
+    ) -> None:
+        self.runtime_cpu_limit_percent = max(10, min(100, int(cpu_limit_percent)))
+        self.runtime_gpu_limit_percent = max(10, min(100, int(gpu_limit_percent)))
+        self.runtime_memory_limit_percent = max(10, min(100, int(memory_limit_percent)))
+
+    def _runtime_output_budget(self) -> int:
+        headroom = min(
+            self.runtime_cpu_limit_percent,
+            self.runtime_gpu_limit_percent,
+            self.runtime_memory_limit_percent,
+        )
+        if headroom <= 35:
+            return 2048
+        if headroom <= 50:
+            return 4096
+        if headroom <= 70:
+            return 8192
+        return 16384
+
+    def _runtime_reasoning_budget(self) -> int:
+        return min(self.reasoning_budget, self._runtime_output_budget())
+
+    def _uses_simple_chat_payload(self) -> bool:
+        return self.model.startswith("openai/gpt-oss")
 
     def _client(self) -> Any:
         if OpenAI is None:
@@ -54,18 +87,21 @@ class NvidiaModel(BaseModel):
         else:
             messages = [{"role": "user", "content": prompt}]
 
-        completion = self._client().chat.completions.create(
-            model=self.model,
-            messages=messages,
-            temperature=1,
-            top_p=0.95,
-            max_tokens=16384,
-            extra_body={
-                "reasoning_budget": self.reasoning_budget,
+        request_kwargs: dict[str, Any] = {
+            "model": self.model,
+            "messages": messages,
+            "temperature": 1,
+            "top_p": 1 if self._uses_simple_chat_payload() else 0.95,
+            "max_tokens": min(4096, self._runtime_output_budget()) if self._uses_simple_chat_payload() else self._runtime_output_budget(),
+            "stream": False,
+        }
+        if not self._uses_simple_chat_payload():
+            request_kwargs["extra_body"] = {
+                "reasoning_budget": self._runtime_reasoning_budget(),
                 "chat_template_kwargs": {"enable_thinking": self.enable_thinking},
-            },
-            stream=False,
-        )
+            }
+
+        completion = self._client().chat.completions.create(**request_kwargs)
 
         message = completion.choices[0].message if completion.choices else None
         content = getattr(message, "content", "") if message is not None else ""

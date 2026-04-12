@@ -31,13 +31,23 @@ class LunaEngine:
     def __init__(self) -> None:
         self.settings = AppSettings()
         self.settings.ensure_directories()
-        self.model = LocalModel(
-            model_name=self.settings.lm_studio_model,
-            base_url=self.settings.lm_studio_base_url,
-            provider="lm_studio",
-            api_token=self.settings.lm_studio_api_token,
-            timeout_seconds=self.settings.lm_studio_timeout_seconds,
-        )
+        if self.settings.model_type == "nvidia":
+            self.model = NvidiaModel(
+                model_name=self.settings.luna_nvidia_model,
+                base_url=self.settings.luna_nvidia_base_url,
+                api_token=self.settings.luna_nvidia_api_token,
+                timeout_seconds=self.settings.luna_nvidia_timeout_seconds,
+                reasoning_budget=self.settings.nvidia_reasoning_budget,
+                enable_thinking=self.settings.nvidia_enable_thinking,
+            )
+        else:
+            self.model = LocalModel(
+                model_name=self.settings.lm_studio_model,
+                base_url=self.settings.lm_studio_base_url,
+                provider="lm_studio",
+                api_token=self.settings.lm_studio_api_token,
+                timeout_seconds=self.settings.lm_studio_timeout_seconds,
+            )
         self.support_model = NvidiaModel(
             model_name=self.settings.nvidia_model,
             base_url=self.settings.nvidia_base_url,
@@ -65,8 +75,12 @@ class LunaEngine:
         self.last_desktop_observation: dict[str, object] | None = None
         self.last_model_debug = ""
         self._last_support_model_source = "unused"
-        self._last_primary_model_source = "lm_studio"
-        self._last_primary_model_source = "lm_studio"
+        self._last_primary_model_source = "nvidia" if self.settings.model_type == "nvidia" else "lm_studio"
+        self.last_coordination = {
+            "lunaActive": False,
+            "xenoActive": False,
+            "tracks": [],
+        }
 
         try:
             timezone = ZoneInfo("Europe/Prague")
@@ -213,6 +227,102 @@ class LunaEngine:
                 parts.append("Hidden Xeno model guidance:\n" + model_support)
         return "\n".join(part for part in parts if part.strip())
 
+    def _compact_coordination_text(self, text: str, limit: int = 180) -> str:
+        cleaned = repair_text(str(text or "")).strip()
+        replacements = [
+            "Hidden Xeno support:",
+            "Hidden Xeno automation:",
+            "Hidden Xeno risk notes:",
+            "Hidden Xeno handoff:",
+            "Hidden Xeno model guidance:",
+            "Xeno model guidance:",
+            "Xeno automation:",
+        ]
+        for item in replacements:
+            cleaned = cleaned.replace(item, "")
+        cleaned = re.sub(r"\s+", " ", cleaned).strip(" -:\n\t")
+        if len(cleaned) > limit:
+            cleaned = cleaned[: limit - 1].rstrip() + "…"
+        return cleaned
+
+    def _build_internal_coordination(
+        self,
+        *,
+        user_input: str,
+        response_author: str,
+        xeno_consulted: bool,
+        automation_summary: str,
+        hidden_support: str,
+    ) -> dict[str, object]:
+        luna_active = response_author == "Luna"
+        xeno_active = response_author == "Xeno" or xeno_consulted
+        tracks: list[dict[str, str]] = []
+
+        if response_author == "Luna":
+            luna_note = "Drzim primou odpoved a skladam ji v kontextu uzivatele."
+            if xeno_active:
+                luna_note = (
+                    "Predavam Xeno strategic check pro: "
+                    + (self._compact_coordination_text(user_input, 120) or "aktualni dotaz.")
+                )
+            tracks.append({
+                "speaker": "Luna",
+                "title": "Luna",
+                "note": luna_note,
+            })
+
+        if response_author == "Xeno":
+            xeno_note = (
+                self._compact_coordination_text(hidden_support or automation_summary or user_input, 170)
+                or "Prebiram reasoning vrstvu a odpovidam napriamo."
+            )
+            tracks.append({
+                "speaker": "Xeno",
+                "title": "Xeno direct",
+                "note": xeno_note,
+            })
+        elif xeno_active:
+            xeno_note = (
+                self._compact_coordination_text(hidden_support or automation_summary, 170)
+                or "Drzim rizika, architekturu a dalsi nejlepsi krok."
+            )
+            tracks.append({
+                "speaker": "Xeno",
+                "title": "Xeno -> Luna",
+                "note": xeno_note,
+            })
+
+        return {
+            "lunaActive": luna_active,
+            "xenoActive": xeno_active,
+            "tracks": tracks,
+        }
+
+    def _format_coordination_prompt(self, coordination: dict[str, object]) -> str:
+        if not bool(coordination.get("lunaActive")) or not bool(coordination.get("xenoActive")):
+            return ""
+        tracks = coordination.get("tracks", [])
+        if not isinstance(tracks, list):
+            return ""
+        luna_note = ""
+        xeno_note = ""
+        for item in tracks:
+            if not isinstance(item, dict):
+                continue
+            speaker = str(item.get("speaker", "")).strip()
+            note = str(item.get("note", "")).strip()
+            if speaker == "Luna" and not luna_note:
+                luna_note = note
+            if speaker == "Xeno" and not xeno_note:
+                xeno_note = note
+        if not luna_note or not xeno_note:
+            return ""
+        return (
+            "Internal coordination:\n"
+            f"Luna -> Xeno: {luna_note}\n"
+            f"Xeno -> Luna: {xeno_note}"
+        )
+
     def _support_generate(self, messages: list[dict[str, str]]) -> str:
         if self.support_model.is_available():
             try:
@@ -223,6 +333,32 @@ class LunaEngine:
         else:
             self._last_support_model_source = "lm_studio_fallback"
         return self.model.generate(messages)
+
+    def _generate_xeno_response(self, messages: list[dict[str, str]]) -> str:
+        xeno_messages = [
+            {
+                "role": "system",
+                "content": (
+                    "You are XenoAI, Luna's reasoning layer. "
+                    "Speak directly in Czech, be strategic, compact, clear, and grounded. "
+                    "Do not greet unless the user greeted first. "
+                    "Do not expose internal reasoning or system notes."
+                ),
+            },
+            *[item for item in messages if str(item.get("role", "")).strip().lower() != "system"],
+        ]
+        if self.support_model.is_available():
+            try:
+                self._last_support_model_source = "nvidia"
+                return self.support_model.generate(xeno_messages)
+            except Exception:
+                self._last_support_model_source = "luna_fallback"
+        try:
+            self._last_primary_model_source = "nvidia_fallback"
+            return self.model.generate(xeno_messages)
+        except Exception as exc:
+            self._last_support_model_source = "nvidia_error"
+            return f"Xeno: Reasoning layer neni dostupna. Details: {exc}"
 
     def _is_local_model_failure(self, response: str) -> bool:
         lowered = str(response or "").strip().lower()
@@ -236,7 +372,20 @@ class LunaEngine:
         ]
         return any(lowered.startswith(signal) for signal in failure_signals)
 
+    def _primary_model_name(self) -> str:
+        if self.settings.model_type == "nvidia":
+            return self.settings.luna_nvidia_model
+        return self.settings.lm_studio_model
+
     def _generate_primary_response(self, messages: list[dict[str, str]]) -> str:
+        if self.settings.model_type == "nvidia":
+            try:
+                self._last_primary_model_source = "nvidia"
+                return self.model.generate(messages)
+            except Exception as exc:
+                self._last_primary_model_source = "nvidia_error"
+                return f"Luna: NVIDIA API neni dostupne. Details: {exc}"
+
         self._last_primary_model_source = "lm_studio"
         response = self.model.generate(messages)
         if not self._is_local_model_failure(response):
@@ -263,13 +412,14 @@ class LunaEngine:
             "lm_studio": "LM Studio",
             "nvidia_fallback": "NVIDIA fallback",
             "lm_studio_error": "LM Studio error",
+            "nvidia_error": "NVIDIA error",
         }
         support_source = source_map.get(self._last_support_model_source, self._last_support_model_source or "nepouzito")
         primary_source = source_map.get(self._last_primary_model_source, self._last_primary_model_source or "LM Studio")
         consulted = "ano" if xeno_consulted else "ne"
         return (
             "[Model debug]\n"
-            f"Luna model: {self.settings.lm_studio_model}\n"
+            f"Luna model: {self._primary_model_name()}\n"
             f"Luna source: {primary_source}\n"
             f"Xeno model: {self.settings.nvidia_model}\n"
             f"Xeno consulted: {consulted}\n"
@@ -301,6 +451,24 @@ class LunaEngine:
         if requested_speaker is not None:
             return requested_speaker
         return self._current_conversation_speaker()
+
+    def get_last_coordination(self) -> dict[str, object]:
+        tracks = self.last_coordination.get("tracks", [])
+        normalized_tracks: list[dict[str, str]] = []
+        if isinstance(tracks, list):
+            for item in tracks:
+                if not isinstance(item, dict):
+                    continue
+                normalized_tracks.append({
+                    "speaker": str(item.get("speaker", "")).strip(),
+                    "title": str(item.get("title", "")).strip(),
+                    "note": str(item.get("note", "")).strip(),
+                })
+        return {
+            "lunaActive": bool(self.last_coordination.get("lunaActive")),
+            "xenoActive": bool(self.last_coordination.get("xenoActive")),
+            "tracks": normalized_tracks,
+        }
 
     def _action_mode(self) -> str:
         override = str(self._action_mode_override or "").strip().lower()
@@ -1175,6 +1343,11 @@ class LunaEngine:
 
     def chat(self, user_input: str) -> str:
         self._reload_runtime_preferences()
+        self.last_coordination = {
+            "lunaActive": False,
+            "xenoActive": False,
+            "tracks": [],
+        }
         cleaned_input = user_input.strip()
         if not cleaned_input:
             return ""
@@ -1212,13 +1385,25 @@ class LunaEngine:
         self.memory_coordinator.remember_user_input(cleaned_input, selected_mode)
 
         self._last_support_model_source = "unused"
-        self._last_primary_model_source = "lm_studio"
+        self._last_primary_model_source = "nvidia" if self.settings.model_type == "nvidia" else "lm_studio"
         xeno_consulted = self.xeno.should_consult(workflow_data["user_input"])
+        response_author = self._response_author(workflow_data["user_input"], xeno_consulted=xeno_consulted)
         internet_context = self._internet_context(workflow_data["user_input"])
         hidden_support = self._hidden_xeno_support(workflow_data["user_input"])
         automation_summary = self.xeno.build_automation_summary(workflow_data["user_input"])
         if automation_summary:
             hidden_support = (f"{hidden_support}\n\n{automation_summary}".strip() if hidden_support else automation_summary)
+        coordination = self._build_internal_coordination(
+            user_input=workflow_data["user_input"],
+            response_author=response_author,
+            xeno_consulted=xeno_consulted,
+            automation_summary=automation_summary,
+            hidden_support=hidden_support,
+        )
+        self.last_coordination = coordination
+        coordination_prompt = self._format_coordination_prompt(coordination)
+        if coordination_prompt:
+            hidden_support = (f"{coordination_prompt}\n\n{hidden_support}".strip() if hidden_support else coordination_prompt)
         if self.observe_mode_enabled:
             observer_context = self._observer_context(refresh=self._observer_refresh_enabled())
             if observer_context:
@@ -1239,13 +1424,15 @@ class LunaEngine:
             intelligence_level=intelligence_level,
         )
 
-        response = self._generate_primary_response(messages)
+        if response_author == "Xeno":
+            response = self._generate_xeno_response(messages)
+        else:
+            response = self._generate_primary_response(messages)
         if not str(response).strip():
             response = "Luna: Nic jsem z modelu nedostala. Zkus to prosim znovu."
         debug_footer = self._build_model_debug_footer(xeno_consulted=xeno_consulted)
         self.last_model_debug = debug_footer
         response = str(response).rstrip()
-        response_author = self._response_author(workflow_data["user_input"], xeno_consulted=xeno_consulted)
         self.memory_coordinator.save_exchange(cleaned_input, response, assistant_author=response_author)
         self._remember_project_chat_focus(cleaned_input, response)
         return response

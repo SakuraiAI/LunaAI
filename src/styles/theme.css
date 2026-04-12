@@ -11,6 +11,9 @@
   --text-soft: #a2a2a8;
   --text-dim: #75757c;
   --white: #f2f2f2;
+  --signal-red: #d94b4b;
+  --signal-red-soft: rgba(217, 75, 75, 0.16);
+  --signal-red-line: rgba(217, 75, 75, 0.42);
   --shadow-xl: 0 36px 110px rgba(0, 0, 0, 0.52);
   --shadow-lg: 0 22px 52px rgba(0, 0, 0, 0.42);
   --shadow-md: 0 14px 34px rgba(0, 0, 0, 0.3);
@@ -586,6 +589,11 @@ button:hover { transform: translateY(-1px); }
   background: linear-gradient(180deg, rgba(255,255,255,0.025) 0%, rgba(255,255,255,0.012) 100%);
   border: 1px solid rgba(255,255,255,0.05);
   box-shadow: inset 0 1px 0 rgba(255,255,255,0.025);
+  transition:
+    border-color 220ms ease,
+    background 220ms ease,
+    box-shadow 220ms ease,
+    transform 220ms ease;
 }
 .hero-node-left,
 .hero-node-right {
@@ -602,12 +610,14 @@ button:hover { transform: translateY(-1px); }
   font-size: clamp(1rem, 1.5vw, 1.35rem);
   font-weight: 700;
   letter-spacing: 0.01em;
+  transition: color 220ms ease, text-shadow 220ms ease;
 }
 .hero-center-orb {
   display: flex;
   align-items: center;
   justify-content: center;
   gap: 14px;
+  position: relative;
 }
 .hero-connector {
   display: block;
@@ -616,6 +626,10 @@ button:hover { transform: translateY(-1px); }
   border-radius: 999px;
   background: linear-gradient(90deg, rgba(255,255,255,0.06) 0%, rgba(255,255,255,0.24) 100%);
   position: relative;
+  transition:
+    background 220ms ease,
+    box-shadow 220ms ease,
+    opacity 220ms ease;
 }
 .hero-connector-right {
   background: linear-gradient(90deg, rgba(255,255,255,0.24) 0%, rgba(255,255,255,0.06) 100%);
@@ -635,6 +649,47 @@ button:hover { transform: translateY(-1px); }
 .hero-connector-left::after {
   right: auto;
   left: -1px;
+}
+.hero-node.is-active {
+  border-color: var(--signal-red-line);
+  background:
+    radial-gradient(circle at center, rgba(217,75,75,0.18) 0%, rgba(217,75,75,0.06) 38%, rgba(217,75,75,0) 100%),
+    linear-gradient(180deg, rgba(44,20,20,0.92) 0%, rgba(24,11,11,0.94) 100%);
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,0.03),
+    0 0 0 1px rgba(217,75,75,0.08),
+    0 0 28px rgba(217,75,75,0.14);
+  animation: heroNodeSignalPulse 1.8s ease-in-out infinite;
+}
+.hero-node.is-active .hero-node-eyebrow {
+  color: rgba(255, 208, 208, 0.78);
+}
+.hero-node.is-active .hero-node-label {
+  color: #fff4f4;
+  text-shadow: 0 0 16px rgba(217,75,75,0.22);
+}
+.hero-connector.is-active {
+  background: linear-gradient(90deg, rgba(217,75,75,0.14) 0%, rgba(217,75,75,0.72) 100%);
+  box-shadow: 0 0 16px rgba(217,75,75,0.16);
+}
+.hero-connector-right.is-active {
+  background: linear-gradient(90deg, rgba(217,75,75,0.72) 0%, rgba(217,75,75,0.14) 100%);
+}
+.hero-connector.is-active::after {
+  background: rgba(255, 212, 212, 0.95);
+  box-shadow: 0 0 12px rgba(217,75,75,0.42);
+}
+.hero-center-orb.is-luna-thinking::before,
+.hero-center-orb.is-xeno-thinking::before,
+.hero-center-orb.is-dual-thinking::before {
+  content: '';
+  position: absolute;
+  inset: 14px 46px;
+  border-radius: 999px;
+  background: radial-gradient(circle at center, rgba(217,75,75,0.2) 0%, rgba(217,75,75,0.05) 40%, rgba(217,75,75,0) 74%);
+  filter: blur(18px);
+  pointer-events: none;
+  animation: heroOrbSignalPulse 1.8s ease-in-out infinite;
 }
 .hero-copy h2 { font-size: 2.1rem; }
 .hero-copy p { max-width: 44rem; color: var(--text-soft); line-height: 1.5; }
@@ -705,6 +760,20 @@ button:hover { transform: translateY(-1px); }
 @keyframes orbFloat {
   0%, 100% { transform: translateY(0) scale(1); }
   50% { transform: translateY(-2px) scale(1.008); }
+}
+@keyframes heroNodeSignalPulse {
+  0%, 100% {
+    transform: translateY(0) scale(1);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.03), 0 0 0 1px rgba(217,75,75,0.08), 0 0 22px rgba(217,75,75,0.12);
+  }
+  50% {
+    transform: translateY(-1px) scale(1.012);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.04), 0 0 0 1px rgba(217,75,75,0.12), 0 0 34px rgba(217,75,75,0.22);
+  }
+}
+@keyframes heroOrbSignalPulse {
+  0%, 100% { opacity: 0.46; transform: scale(0.98); }
+  50% { opacity: 0.82; transform: scale(1.03); }
 }
 @keyframes orbShadowPulse {
   0%, 100% { opacity: 0.55; transform: scale(0.98); }

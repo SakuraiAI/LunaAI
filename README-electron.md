@@ -11,13 +11,15 @@ This is a React + Electron desktop shell for LunaAI.
 
 ## Structure
 - `electron/main.js` - Electron main process
-- `electron/preload.js` - safe preload bridge
+- `electron/preload.cjs` - safe preload bridge
+- `electron/services/` - smaller Electron service modules for settings, updates, apps, metrics, and Luna bridge
 - `src/App.jsx` - root renderer shell
 - `src/components/` - reusable UI pieces
 - `src/layouts/` - shell layout
 - `src/pages/` - section pages
 - `src/sections/` - reusable page surface pieces
 - `src/styles/theme.css` - black-and-white premium theme
+- `.env.example` - environment-based model and API configuration template
 
 ## Included UI
 - custom title bar

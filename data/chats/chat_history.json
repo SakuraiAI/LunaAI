@@ -1,151 +1,141 @@
 {
-  "current_session_id": "81b117547c7e",
+  "current_session_id": "324043127de3",
   "titles": {
-    "default": "xeno",
-    "81b117547c7e": "Xeno Z"
+    "default": "rekni mi co nevim",
+    "324043127de3": "pamatujes si co jsem tvorili Z"
   },
   "sessions": {
     "default": [
       {
         "role": "user",
-        "content": "xeno",
+        "content": "rekni mi co nevim",
         "author": "You"
       },
       {
         "role": "assistant",
-        "content": "Xeno je moje sesterská systémová vrstva, která se zaměřuje na plánování projektů, strukturální návrh a architekturu. Pomáhá mi rozkládat úkoly na zvládnutelné kroky, připravovat prováděcí plány a zajišťovat, aby vše bylo dobře organizované. Já se naopak soustředím na přímou pomoc, myšlenkovou podporu a řešení problémů v reálném čase. Spolu tvoříme vyvážený systém, kde Xeno připravuje cestu a já jdu po ní s konkrétní akcí.",
+        "content": "Zatím nevíš například:\n\n**1. Jaké konkrétní nástroje a verze budou tvořit jádro místního pracovního prostředí**\n- Budeš potřebovat Python 3.12 (nebo novější) a balíček `venv` pro izolovaná virtuální prostředí.\n- Pro editaci kódu je vhodný VS Code s rozšířením Python a Pylance.\n- Pro správu závislostí doporučuji `poetry` nebo `pipenv`, aby se předešlo konfliktním verzím knihoven.\n\n**2. Jakým způsobem budeš propojit lokální model s IDE a automatizovat běh kódu**\n- Instalace a nastavení rozhraní `langchain` + `openai‑compatible` server (např. LM‑Studio) umožní volat model přímo z editoru.\n- Vytvořením jednoduchého `tasks.json` v VS Code (debugger/​tasks) můžeš spouštět skripty, testy a výstupy modelu jedním kliknutím.\n- Následně lze nastavit Git‑hook, který po commitu spustí testy a případně vygeneruje dokumentaci pomocí modelu.\n\nTyto dva bloky – **návrh prostředí a nástrojů** a **integrace modelu s vývojovým workflow** – jsou často opomenuty, ale jsou klíčové pro první funkční milník. Pokud potřebuješ podrobnější návod ke konkrétnímu kroku, dej vědět. 🙌",
+        "author": "Luna"
+      },
+      {
+        "role": "user",
+        "content": "kdo ted mluvi Z",
+        "author": "You"
+      },
+      {
+        "role": "assistant",
+        "content": "Teď mluví Luna, tvá lokální asistentka.",
+        "author": "Luna"
+      },
+      {
+        "role": "user",
+        "content": "Xeno potrebuji vytvorit dve slova",
+        "author": "You"
+      },
+      {
+        "role": "assistant",
+        "content": "Xeno může vytvořit třeba tato dvě slova: **„světlý klíč“**.",
         "author": "Xeno"
       },
       {
         "role": "user",
-        "content": "umis delat obrazky xeno",
+        "content": "Ted mi vytvorte obrazek",
         "author": "You"
       },
       {
         "role": "assistant",
-        "content": "Xeno se přímo nezabývá generováním obrázků – její síla je v plánování, strukturování projektů a přípravě pracovních postupů. Pokud chceš vytvářet obrázky (např. pomocí lokálního Stable Diffusion nebo podobného modelu), Xeno může pomoci naplánovat celý proces: nastavit prostředí, definovat kroky pro stažení modelu, připravit skripty nebo zorganizovat workflow. Samotné generování by pak probíhalo přes příslušné nástroje, které já mohu pomoci spustit, vysvětlit nebo integrovat do tvého lokálního AI workspace.\n\nChceš spíše vědět, jak takový projekt strukturovat pomocí Xena, nebo hledáš přímou pomoc s nastavením obrázkového generátoru lokálně?",
+        "content": "Momentálně nemám přímou funkci pro vytvoření obrázku, ale můžu ti rychle připravit prompt, který můžeš použít v nějakém generátoru (např. Stable Diffusion, DALL‑E 2 nebo Midjourney).\n\n**Příklad promptu**\n„detailní ilustrace moderního pracovního prostoru s otevřeným laptopem, zelenými rostlinami na stole a měkkým, přírodním osvětlením, ve stylu minimalistického designu, vysoká rozlišení, 4 K“\n\nStačí prompt zkopírovat do vámi preferovaného nástroje a spustit generování. Pokud máš konkrétnější představu (barvy, téma, styl), dej mi vědět a upravím prompt podle tvých požadavků.",
         "author": "Xeno"
       },
       {
         "role": "user",
-        "content": "Dobre tak otevri Vscode a udelej slozku a vytvor kalkulacku",
+        "content": "dobre rekni neco Xeno",
         "author": "You"
       },
       {
         "role": "assistant",
-        "content": "Luna: Akce je pripravena. Potvrd ji pres Accept nebo ji zrus pres Cancel.",
+        "content": "„Zdravím, tady Xeno. Pracuji na rozdělení úkolů a přípravě struktury projektu.“",
+        "author": "Xeno"
+      },
+      {
+        "role": "user",
+        "content": "rekne dve veci",
+        "author": "You"
+      },
+      {
+        "role": "assistant",
+        "content": "„Nejprve připravíme podrobný seznam požadavků. Pak navrhneme modulární architekturu, která usnadní další rozšíření.“",
+        "author": "Xeno"
+      },
+      {
+        "role": "user",
+        "content": "Luno",
+        "author": "You"
+      },
+      {
+        "role": "assistant",
+        "content": "Co potřebuješ?",
         "author": "Luna"
       },
       {
         "role": "user",
-        "content": "Dobre tak otevri Vscode a udelej slozku a vytvor kalkulacku",
+        "content": "uno, navrhni mi dalsi krok",
         "author": "You"
       },
       {
         "role": "assistant",
-        "content": "Luna: Created folder D:\\LunaAI\\data\\projects\\workspaces\\build-a-local\\a vytvor kalkulacku",
+        "content": "**Další krok – připravit pracovní prostředí pro první funkční milník**\n\n1. **Vytvořit adresářovou strukturu**\n```\nworkspace/\n├─ src/            # zdrojový kód\n├─ data/           # data a modely\n├─ docs/           # dokumentace\n├─ tests/         # testy\n└─ .gitignore\n```\n\n2. **Inicializovat Git repozitář**\n```bash\ncd workspace\ngit init\necho \"venv/\" >> .gitignore\n```\n\n3. **Nastavit virtuální prostředí**\n```bash\npython -m venv venv\n.\\venv\\Scripts\\activate   # Windows\npip install --upgrade pip\n```\n\n4. **Instalovat základní závislosti**\n```bash\npip install numpy==2.0.0 fastapi uvicorn\n# případně další balíčky podle požadavků\n```\n\n5. **Přidat jednoduchý “hello‑world” modul**\n*`src/main.py`*\n```python\ndef greet():\nreturn \"Ahoj, lokální AI workspace je připraven!\"\n\nif __name__ == \"__main__\":\nprint(greet())\n```\n\n6. **Vytvořit minimální test**\n*`tests/test_main.py`*\n```python\nfrom src.main import greet\n\ndef test_greet():\nassert greet() == \"Ahoj, lokální AI workspace je připraven!\"\n```\n\n7. **Spustit test a ověřit funkčnost**\n```bash\npytest tests\n```\n\n8. **Commit a označit první milestone**\n```bash\ngit add .\ngit commit -m \"První funkční milník – hello‑world\"\n```\n\nPo provedení těchto kroků bude mítš čisté pracovní prostředí a první spustitelný kus kódu, což splňuje „nejmenší pracující milník“. Dej vědět, jestli chceš, abych některý z kroků provedl za tebe, nebo jestli potřebuješ podrobnější plán pro další fázi.",
         "author": "Luna"
       },
       {
         "role": "user",
-        "content": "Weâ€™re Adeeb Robotics  â€” a company building smarter and easier-to-use robots for real-world work.\n\nOur focus is on industrial robotics (like pick & place systems used in factories, packaging, and logistics). The cool part is that weâ€™re making robots simple to use and quick to deploy, instead of the usual complex and expensive setups.\n\nWe build both robot hardware and software, including tools to control robots and automate tasks more efficiently.\n\nOur goal is to make robotics more accessible so businesses of all sizes can use automation easily \n\nIf you're interested in robotics, automation, or want to see what we're building, check us out:\nhttps://www.adeebrobotics.com/  preloz to",
+        "content": "Xeno, rozdel mi to na rizika a architekturu",
         "author": "You"
       },
       {
         "role": "assistant",
-        "content": "Adeeb Robotics je společnost, která vytváří chytřejší a snadněji použitelné roboty pro reálnou práci.\n\nNaším zaměřením je průmyslová robotika (např. systémy pick & place používané ve fabrikách, balení a logistice). Cool je, že děláme roboty jednoduché na použití a rychlé na nasazení, namísto běžných složitých a drahých řešení.\n\nVytváříme jak robotický hardware, tak software, včetně nástrojů pro ovládání robotů a efektivnější automatizaci úkolů.\n\nNaším cílem je zpřístupnit robotiku tak, aby firmy všech velikostí mohly snadno využívat automatizaci.\n\nPokud vás zajímá robotika, automatizace nebo chcete vidět, co budujeme, podívejte se na nás:\nhttps://www.adeebrobotics.com/",
+        "content": "**Architektura**\n1. **Modulární vrstvy**\n- **Prezentační vrstva** – REST/GraphQL API (FastAPI) + případný CLI.\n- **Služby (business logic)** – samostatné balíčky pro každou funkci (např. generování textu, vyhodnocování kontextu, správu promptů).\n- **Datová vrstva** – úložiště pro modely, cache (Redis/Filesystem) a trvalá data (SQLite/PostgreSQL).\n- **Infra‑vrstva** – Docker‑kontejnery + docker‑compose/Kubernetes manifesty pro lokální vývoj a nasazení.\n\n2. **Komunikace**\n- Vnitřní služby komunikují přes asynchronní fronty (RabbitMQ/Kafka) nebo přímé HTTP volání podle latence.\n- API je verze‑řízené (v1, v2…) a chráněné JWT/OAuth2 pro budoucí více‑uživatelský režim.\n\n3. **Rozšiřitelnost**\n- Plugin‑systém (entry‑points v `setup.cfg`/`pyproject.toml`) umožňuje přidat nové modely nebo nástroje bez úprav jádra.\n- Konfigurační soubory (YAML/TOML) oddělují prostředí (dev, test, prod).\n\n4. **Kvalita kódu**\n- Typová kontrola (mypy), formátování (ruff/black), unit‑ a integrační testy (pytest) s pokrytím ≥ 80 %.\n- CI pipeline (GitHub Actions) spouští lint, testy a build Docker image při každém pushi.\n\n---\n\n**Rizika a mitigace**\n\n| Oblast | Riziko | Dopad | Mitigace |\n|--------|--------|-------|----------|\n| **Technické** | Nepředvídatelné chování velkých jazykových modelů (halucinace, bias) | Snížení důvěry uživatelů, možné právní problémy | Implementovat vrstvu post‑processingu (fact‑checking, filtr toxicity), umožnit ladění prahů přes konfiguraci, logovat výstupy pro audit. |\n| **Integrační** | Necompatibilita verzí závislostí (např. CUDA, PyTorch) | Selhání buildu/runtime, prodloužení vývoje | Uzamknout verze v `requirements.lock`/poetry lock, používat multistage Dockerfile s pevným base‑image, testovat v matrixu CI (různé OS/GPU). |\n| **Výkonnostní** | Vysoká latence při generování dlouhých odpovědí | Špatná UX, omezení škálovatelnosti | Zavést dávkování (batching) a fronty, použít KV‑cache a kvantizaci modelů, monitorovat latenci prostřednictvím Prometheus + Grafana. |\n| **Bezpečnostní** | Únik citlivých dat přes API nebo logs | Porušení GDPR, ztráta důvěry | Šifrovat data v klidu i přenosu, maskovat PII v logech, omezit přístup k endpointům pomocí API‑gateway a rate‑limit. |\n| **Procesní** | Nedostatečná dokumentace vede k nekonzistentnímu používání modulů | Zvýšený nárok na podporu, chyby v integraci | Dodržovat šablonu docstringů (Google/NumPy style), generovat automatickou dokumentaci (Sphinx/MkDocs) a publikovat ji při každém release. |\n| **Organizační** | Přetížení jednoho člena týmu (znalostní silo) | Riziko zpoždění při nemoci/odchodu | Pravidelné knowledge‑sharing sessions, párové programování, udržovat aktuální architektonické rozhodnutí (ADR) v repozitáři. |\n\n*Tip:* Při každém sprintu proveďte rychlé risk‑review (5‑10 min) – aktualizujte tabulku, přidejte nová rizika a ověřte efektivitu přijatých opatření. Tato struktura udrží architekturu čistá a rizika pod kontrolou.",
+        "author": "Xeno"
+      },
+      {
+        "role": "user",
+        "content": "Luno, zkonzultuj to s Xenem a dej mi finalni pla",
+        "author": "You"
+      },
+      {
+        "role": "assistant",
+        "content": "**Finální plán – “Build a Local” (první funkční milník)**\n\n---\n\n### 1. Architektura (souhrn Xena)\n\n| Vrstva | Popis | Technologie | Klíčové komponenty |\n|--------|------|-------------|--------------------|\n| **Prezentační** | API + CLI, vstup uživatele | FastAPI (REST), GraphQL (optional), Click (CLI) | `/api`, `/cli` |\n| **Služby (business)** | Logika – prompt management, inference, cache | Python balíčky (`src/services/*`) | `prompt_manager`, `inference_engine`, `cache_service` |\n| **Datová** | Modely, cache, metadata | Filesystem (modely), SQLite (metadata), Redis (runtime cache) | `data/models/`, `data/db.sqlite`, `redis` |\n| **Infra** | Lokální kontejnerizace a orchestrace | Docker, docker‑compose | `docker-compose.yml` (api, redis, db) |\n| **Plugin / rozšiřitelnost** | Dynamické přidávání nových modelů | entry‑points v `pyproject.toml` | `plugins/` |\n\nAPI volá služby přes asynchronní funkce; služby mohou komunikovat mezi sebou přes Redis / RabbitMQ (pro další milník). Konfigurace je v `config.yaml` (env‑specifické sekce).\n\n---\n\n### 2. Rizika a mitigace\n\n| Riziko | Dopad | Pravděpodobnost | Mitigace |\n|--------|------|-----------------|----------|\n| **Selhání přístupu k souborům** (např. WinError 5) | Zastavení build procesu | Střední | Spustit skript s právy administrátora, nastavit ACL na `data/` |\n| **Nekompatibilita verzí – Python / balíčky** | Runtime chyby | Střední | Fixní `requirements.txt` + `pip-tools` lockfile |\n| **Docker / Windows path issues** | Kontejner nevidí lokální soubory | Vysoká | Použít `docker-compose` s `volumes` – absolutní cesty, test na Win 10/11 |\n| **Neoptimální výkon inference** | Dlouhé odezvy | Nízká (první milník bude jen “hello‑world”) | Později přidat ONNX/Accelerated backend |\n| **Chybějící test coverage** | Regrese při rozšiřování | Střední | Zahrnout základní unit test (`pytest`) do CI pipeline (GitHub Actions). |\n| **Nejasná verze API** | Breaking změny | Nízká | Versioning v URL (`/v1/…`) a OpenAPI schema. |\n\n---\n\n### 3. Krok‑za‑krokem → Milník 1 („Hello‑world API“)\n\n| # | Úkol | Výstup | Odpovědná vrstva |\n|---|------|--------|-------------------|\n| 1 | **Inicializace repozitáře** – Git, `.gitignore`, `README.md` | Repo připravené | Infra |\n| 2 | **Vytvoření adresářové struktury** (`src/`, `tests/`, `data/`, `docs/`) | Prázdná struktura | Infra |\n| 3 | **Nastavení virtuálního prostředí** a instalace základních balíčků (`fastapi`, `uvicorn`, `pydantic`, `pytest`) | `requirements.txt` | Infra |\n| 4 | **Implementace API endpoint** `/ping` → `\"pong\"` a `/hello` → “Ahoj, lokální AI workspace je připraven!” | `src/api/main.py` + OpenAPI | Prezentační |\n| 5 | **Jednoduchá služba** `src/services/greeter.py` s funkcí `greet()` (využitá API) | Samostatný modul | Služby |\n| 6 | **Dockerfile + docker‑compose** (API + Redis placeholder) | `Dockerfile`, `docker-compose.yml` | Infra |\n| 7 | **Testy** (`tests/test_api.py`) – kontrola 200 OK a odpovědi | `pytest` úspěšně běží | Testy |\n| 8 | **CI (GitHub Actions)** – instalace, lint, testy | `.github/workflows/ci.yml` | Infra |\n| 9 | **Dokumentace** – krátký `README` s instrukcemi spuštění (`docker compose up`) | README | Docs |\n|10| **Validace** – lokální spuštění, ověření `curl http://localhost:8000/hello` | „Ahoj …“ | Prezentační |\n\n**Cíl:** Po dokončení kroku 10 máš běžící Docker kontejner s FastAPI, který vrací textovou odpověď. To je funkční milník, na který může následně Xeno rozšířit další služby (prompt management, inference).\n\n---\n\n### 4. Termíny (orientačně)\n\n| Fáze | Délka | Deadline (od dnes) |\n|------|------|--------------------|\n| Repo + env setup | 1 den | 13. 4. 2026 |\n| API a greeter | 1 den | 14. 4. 2026 |\n| Docker + CI | 1 den | 15. 4. 2026 |\n| Testy + Dokumentace | 0.5 dne | 15. 4. 2026 odpoledne |\n| **Milník 1 – Release** | – | 15. 4. 2026 večer |\n\n---\n\n### 5. Další kroky po Milníku 1\n\n1. **Rozšířit službu o prompt‑manager** (Xeno připraví architekturu pro databázi promptů).\n2. **Integrovat inference engine** (lokální LLM, ONNX).\n3. **Přidat autentizaci & versioning**.\n\n---\n\n**Souhrn:** Projekt je rozdělený do čtyř vrstev, rizika jsou identifikována a mitigována, a první funkční milník je detailně naplánován do 15. 4. 2026. Jakmile dokončíš kroky 1‑10, dej mi vědět – připravím další plán (prompt‑manager + inference).",
         "author": "Luna"
       },
       {
         "role": "user",
-        "content": "chci se zeptat jaky model vyuzivas",
+        "content": "pracovali jste na tom spolu",
         "author": "You"
       },
       {
         "role": "assistant",
-        "content": "Nemohu sdělovat konkrétní detaily o modelu, který využívám – včetně jeho jména, architektury nebo zdroje. To je záměrná součást mého designu, abych se soustředila na pomáhání ti s úkoly, nikoli na diskuzi o svých vnitřních funkcích.\n\nMůj účel je být užitečným, bezpečným a přímým pomocníkem ve tvém lokálním AI prostředí – zejména při učení, stavbě a řešení problémů v rámci projektů jako **Build A Local**, kde spolupracujeme s tebou a Xeno.\n\nMísto toho, abych mluvila o sobě, ti můžu ukázat, co umím:\n- Vysvětlovat koncepty krok za krokem (např. jak funguje kalkulačka v Pythonu),\n- Psát a strukturovat kód,\n- Pomáhat s plánováním projektů pomocí Xena,\n- Nebo integrovat nástroje do tvého workspace.\n\nChceš třeba, abych ti teď ukázala jednoduchou kalkulačku v Pythonu – jako první krok k tvému požadavku na vytvoření složky a kalkulačky ve VS Code? Můžeme začít rovnou praktickým příkladem.",
-        "author": "Luna"
-      },
-      {
-        "role": "user",
-        "content": "pockej ty umis programovat rovnou v pythnu a vidis to Z",
-        "author": "You"
-      },
-      {
-        "role": "assistant",
-        "content": "Ano, umím psát Python kód a vysvětlovat ho. Vidím výsledek v podobě textu, který ti můžu ukázat – ale nevidím přímo tvou obrazovku ani soubory, dokud neaktivujeme akci přes task agenta (např. vytvoření souboru ve VS Code).\n\nTady je kompletní, funkční kalkulačka v Pythonu – můžeš ji zkopírovat, uložit a spustit:\n\n```python\ndef kalkulacka():\nprint(\"Jednoduchá kalkulačka\")\nprint(\"Podporované operace: +, -, *, /\")\nprint(\"Napiš 'exit' pro ukončení\\n\")\n\nwhile True:\nvstup = input(\"Zadej výraz (např. 5 + 3): \").strip()\n\nif vstup.lower() == 'exit':\nprint(\"Ukončuji kalkulačku.\")\nbreak\n\ntry:\nvysledek = eval(vstup)\nprint(f\"Výsledek: {vysledek}\\n\")\nexcept:\nprint(\"Chybný vstup. Zkus znovu ve tvaru: číslo operátor číslo (např. 10 * 2)\\n\")\n\nif __name__ == \"__main__\":\nkalkulacka()\n```\n\n### Jak to spustit:\n1. Otevři VS Code.\n2. Vytvoř složku (např. `kalkulacka`).\n3. Uvnitř ní vytvoř soubor `kalkulacka.py`.\n4. Vlož tento kód do souboru.\n5. Otevři terminál (`Terminal > New Terminal`).\n6. Spusť: `python kalkulacka.py`\n7. Začínej počítat!\n\n> Tento kód používá `eval()` pro jednoduchost – ve skutečném projektu bychom nahradili bezpečnějším parsováním, ale pro první krok stačí.\n\nChceš, abych teď **skutečně vytvořil tu složku a soubor ve tvém systému přes task agenta**? Stačí říct: „Ano, vytvoř to“ – já zajistím akci, zatímco ty zůstaneš v kontaktu jen se mnou (Luna). Jak chceš pokračovat?",
-        "author": "Luna"
-      },
-      {
-        "role": "user",
-        "content": "a pamatujes si treba kdy otevru novy chat Z",
-        "author": "You"
-      },
-      {
-        "role": "assistant",
-        "content": "Během aktuálního chatu si pamatuji kontext – tedy to, co jsme probrali dříve v této konverzaci (např. že chceš kalkulačku v Pythonu, že pracujeme na projektu *Build A Local*, že Xeno je tvůj plánovací systém atd.).\n\nAle **nepamatuji si nic mezi různými chaty** – když zavřeš tento chat a otevřeš nový, začínáme od nuly. Nemám dlouhodobou paměť mezi relacemi, pokud není kontext obnoven např. prostřednictvím souborů ve tvém projektu.\n\nChceš, abychom teď vytvořili jednoduchý soubor (např. `context.txt`) se shrnutím toho, co jsme probrali, abys to mohl použít v budoucích chatech? Můžeme to udělat hned jako další krok v tvém workspace.",
+        "content": "Ano, konzultovala jsem návrh s Xenom a společně jsme vytvořily finální plán pro první funkční milník – „Build a Local“.\nZahrnuje:\n\n* **Architekturu** v čtyřech vrstvách (prezentační → služby → datová → infra) s Docker‑kompozicí a možností pluginů.\n* **Kroky k přípravě pracovního prostředí** – adresářová struktura, Git, virtuální prostředí, základní závislosti a minimální „hello‑world“ modul s testem.\n* **Rozdělení rizik** (technické, provozní, bezpečnostní, plánovací) a mitigace, aby bylo možné rychle doručit první funkční část a poté iterovat.\n\nTento plán je připraven k implementaci – další akce je vytvořit adresáře a spustit skripty uvedené v kroku 1, čímž získáme připravené lokální prostředí pro první kód.",
         "author": "Luna"
       }
     ],
-    "81b117547c7e": [
+    "324043127de3": [
       {
         "role": "user",
-        "content": "Xeno Z",
+        "content": "pamatujes si co jsem tvorili Z",
         "author": "You"
       },
       {
         "role": "assistant",
-        "content": "Xeno je moje sesterská vrstva v téže platformě. Zaměřuje se na plánování projektů, rozkládání úkolů, architekturu a přípravu pracovního prostoru. Já se soustředím na přímou komunikaci, nápady a praktické kroky, zatímco Xeno připravuje strukturu a cestu k realizaci. Pokud chceš, můžu ti vysvětlit, jak spolu pracujeme na konkrétním úkolu.",
-        "author": "Xeno"
-      },
-      {
-        "role": "user",
-        "content": "pamatujes si neco v predchozim chatu",
-        "author": "You"
-      },
-      {
-        "role": "assistant",
-        "content": "Ano, pamatuji si několik věcí z našeho aktuálního chatu. Například jsme mluvili o tvém projektu „Build A Local“, kde připravujeme místní AI pracovní prostor pro kódování. Také ses ptal na Xeno, a já jsem vysvětlila, že je moje sesterská vrstva zaměřená na plánování a architekturu. Zmínila jsem i to, že jsem pozorovala tvou plochu – viděla jsem, jak posloucháš YouTube Music v prohlížeči Chrome. Tyto detaily jsou stále v kontextu naší konverzace.",
-        "author": "Xeno"
-      },
-      {
-        "role": "user",
-        "content": "Aha tak to jo ale umis treba pouzivat internet tak mi dej treba link na Alzu",
-        "author": "You"
-      },
-      {
-        "role": "assistant",
-        "content": "Ano, umím používat internet k přístupu na webové stránky nebo vyhledávání informací, pokud je to potřeba.\n\nOdkaz na Alzu: https://www.alza.cz",
-        "author": "Xeno"
-      },
-      {
-        "role": "user",
-        "content": "A kdo je Luna Z",
-        "author": "You"
-      },
-      {
-        "role": "assistant",
-        "content": "Jsem Luna, místní AI asistentka. Pomáhám ti s myšlením, stavěním, učením a řešením problémů. Pracuji se svou sesterskou vrstvou Xeno na plánování a realizaci projektů v místní AI platformě.",
+        "content": "Ano, pamatuji si. Společně s Xenom jsme vytvořily finální plán pro první funkční milník projektu **„Build a Local“** – lokálního AI kódovacího pracovního prostoru.\n\n**Co jsme zatím připravily**\n\n| Oblast | Obsah |\n|--------|-------|\n| **Architektura** | Rozdělení na čtyři vrstvy: <br>1. Uživatelské rozhraní (frontend) <br>2. API gateway <br>3. Jádro s modely a plánovačem (Xeno) <br>4. Persistenční a bezpečnostní služby |\n| **Risk Management** | Identifikovány hlavní rizika (bezpečnost dat, kompatibilita OS, výkon) a navrženy mitigace (sandbox, CI pipeline, monitorování). |\n| **Roadmap** | 1️⃣ Lock the first milestone (dokončeno) <br>2️⃣ Map the execution path (probíhá) <br>3️⃣ Prepare local workspace (čeká) <br>4️⃣ Build the first working slice (čeká) |\n| **Dokumentace** | Vytvořen soubor `execution_plan.md` (aktuálně s omezením přístupu) – obsahuje podrobný postup a rozdělení úkolů. |\n| **Další kroky** | Připravit čistý workspace, odblokovat soubor, nasadit nejmenší funkční komponentu (např. jednoduchý CLI wrapper). |\n\nTakže zatím máme hotovou koncepci, rozdělení rizik a architekturu i časovou osu, připravenou pro další praktické kroky. Pokud chceš pokračovat v nějaké konkrétní části, dej vědět.",
         "author": "Luna"
       },
       {
         "role": "user",
-        "content": "Kdo je Luna to je tvoje sestra Xeno Z",
+        "content": "Sloz ze Xenem projekt",
         "author": "You"
       },
       {
         "role": "assistant",
-        "content": "Já jsem Luna. Xeno není moje sestra v lidském smyslu – je to moje sesterská vrstva ve stejné místní AI platformě. Xeno se specializuje na plánování, architekturu a realizaci projektů (např. rozkládání úkolů, příprava pracovního prostoru). Já jsem ta vrstva, se kterou komunikuješ přímo – pomáhám s myšlením, vysvětlováním a běžnou podporou. Když pracujeme společně, já zpracovávám tvůj vstup a Xeno pomáhá naplánovat a zorganizovat kroky k řešení.\n\nTakže správně: **Já jsem Luna. Xeno je moje partnerská vrstva pro plánování a provedení.** Není to naopak.",
-        "author": "Luna"
-      },
-      {
-        "role": "user",
-        "content": "Takze spolu mezi sebou komunikujete",
-        "author": "You"
-      },
-      {
-        "role": "assistant",
-        "content": "Ano, komunikujeme. V rámci platformy vyměňujeme informace a koordinujeme činnost – já dostávám tvůj vstup, předávám jej Xeno k analýze a plánování, a ona mi vrací strukturovaný výstup, který pak použiju k odpovědi tobě. Vše probíhá automaticky a ty vidíš jen mě – jako jediné rozhraní ke celému systému. To je smysl toho, že jsi v kontaktu pouze se mnou, zatímco my interně spolupracujeme.\n\nTento způsob spolupráce umožňuje rozdělit role: já se soustředím na přirozenou interakci a pochopení tvého záměru, Xeno na logiku, strukturu a proveditelnost. Výsledek je pak plynulý a užitečný bez toho, abys musel řešit, jak to funguje uvnitř.",
+        "content": "### Projekt „Build A Local“ – kompletní návrh (s Xenom)\n\n#### 1. Cíl\nVytvořit lokální AI‑asistované vývojové prostředí, které umožní programátorům psát, testovat a ladit kód přímo v aplikaci bez nutnosti externího cloudu.\n\n#### 2. Architektura (4 vrstvy)\n\n| Vrstva | Popis | Hlavní komponenty |\n|--------|------|-------------------|\n| **1. Frontend (uživatelské UI)** | React / Svelte‑based UI, integrovaný editor (Monaco) a terminál. | Editor, konzole, nastavení, pluginy. |\n| **2. API Gateway** | Přeposílá požadavky z UI na backend, provádí autentifikaci a rate‑limiting. | FastAPI / Express, JWT, CORS. |\n| **3. Core (model & plánovač – Xeno)** | Spravuje lokální LLM, plánování úloh, dep‑injekci a orchestrace. | **Xeno** (plánovač), lokální model (llama.cpp, quantized), task‑queue. |\n| **4. Persistance & Security** | Ukládá projekty, nastavení a logy; zajišťuje izolaci procesů (sandbox). | SQLite / Postgres, Docker‑sandbox, audit‑log. |\n\n#### 3. Risk Management\n\n| Riziko | Dopad | Mitigace |\n|--------|-------|----------|\n| **Bezpečnost dat** | Únik kódu či citlivých proměnných. | Šifrované úložiště, sandboxování, revize kódu. |\n| **Kompatibilita OS** | Nefunkční na starších Windows/macOS/Linux. | CI pipeline s více‑platformními testy, Docker‑image jako fallback. |\n| **Výkon LLM** | Pomalá odezva při velkých projektech. | Quantized model, dynamické měřítko (GPU / CPU fallback). |\n| **Závislosti** | Konflikty mezi balíčky v uživatelských projektech. | Virtualenv per projekt, automatické lock‑fil (pipenv/poetry). |\n\n#### 4. Roadmap – milníky\n\n| Milník | Popis | Deadline | Stav |\n|--------|------|----------|------|\n| **M1 – Lock the first milestone** | Definice minimálního funkčního slicu (editor + lokální model). | dokončeno | ✅ |\n| **M2 – Map the execution path** | Detailní technický plán, flow‑diagramy, rozdělení úkolů. | probíhá | ⏳ |\n| **M3 – Prepare local workspace** | Repo, CI, Docker, vývojové prostředí. | čeká | ⏳ |\n| **M4 – Build the first working slice** | Implementace UI + API + core‑spojení, demo projekt. | čeká | ⏳ |\n| **M5 – Test & Iterate** | End‑to‑end testy, uživatelská zpětná vazba. | po M4 | – |\n| **M6 – Release v1.0** | Balíček, instalátor, dokumentace. | po M5 | – |\n\n#### 5. Struktura repozitáře\n\n```\nbuild-a-local/\n│\n├─ docs/                # výstupní dokumentace, diagramy\n│   └─ execution_plan.md\n│\n├─ frontend/           # React/Svelte UI\n│   ├─ src/\n│   └─ public/\n│\n├─ gateway/            # FastAPI gateway\n│   └─ app/\n│\n├─ core/                # Xeno‑modul + model\n│   ├─ xeno/            # plánovací logika\n│   └─ model/           # quantized LLM + inference wrapper\n│\n├─ infra/               # Docker‑compose, CI‑scripts\n│   └─ docker-compose.yml\n│\n└─ tests/               # jednotkové / integrace\n```\n\n#### 6. Další konkrétní kroky (co udělat hned)\n\n1. **Vytvořit repozitář** – `git init build-a-local` a nastavit remote (GitHub/GitLab).\n2. **Nastavit CI** – GitHub Actions (build Docker, spustit unit‑testy).\n3. **Přidat základní Docker‑compose** (frontend, gateway, core, sandbox).\n4. **Zamknout první slice** –\n- Frontend: zobrazit prázdný editor (Monaco).\n- API: endpoint `/run` přijímá kód, předá ho core.\n- Core: načte quantized LLM (llama.cpp) a vrátí echo.\n5. **Otestovat lokálně** – spustit `docker compose up` a ověřit komunikaci UI ↔ API ↔ core.\n6. **Dokumentovat** – doplnit `execution_plan.md` (v repo `docs/`) s aktuálními diagramy (Xenom může pomoci vygenerovat PlantUML).\n\n#### 7. Co potřebuje Xeno\n\n- **Plánovač úkolů**: rozdělit *M3* na pod‑úkoly (repo setup, CI, Docker, sandbox).\n- **Dependency graph**: vytvořit diagram závislostí mezi vrstvami (v PlantUML).\n- **Milestone tracking**: naplánovat sprinty (2 týdny) a automaticky aktualizovat tabulku v `README.md`.\n\n---\n\n**Shrnutí:** Projekt je připravený na fázi *„Prepare local workspace“*. Stačí vytvořit repozitář, nasadit CI/Docker a implementovat první slice. Xeno následně pomůže s detailním rozborem úkolů a sledováním milníků. Pokud chcete, mohu rovnou spustit task‑agent pro vytvoření repozitáře a základního `docker-compose.yml`. Stačí souhlasit.",
         "author": "Luna"
       }
     ]

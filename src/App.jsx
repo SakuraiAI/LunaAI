@@ -105,6 +105,126 @@ function shouldConsultXeno(text) {
   return /\b(navrhni|architektura|architekturu|rizika|tok dat|rozdelej|faze|f?ze|kroky|implementace|plan|pl[a?]n|workspace|strategi|system)\b/i.test(text);
 }
 
+function getRequestedSpeaker(text) {
+  const normalized = String(text || '').trim().toLowerCase();
+  if (!normalized) return null;
+  if (/\bxeno(ai)?\b/.test(normalized)) return 'Xeno';
+  if (/\bluna(ai)?\b/.test(normalized) || /\bluno\b/.test(normalized)) return 'Luna';
+  return null;
+}
+
+function createThinkingState(text, { fallbackToLuna = true } = {}) {
+  const requestedSpeaker = getRequestedSpeaker(text);
+  const consultXeno = shouldConsultXeno(text);
+
+  if (requestedSpeaker === 'Xeno') {
+    return {
+      visible: true,
+      lunaActive: false,
+      xenoActive: true,
+      tracks: [
+        {
+          speaker: 'Xeno',
+          title: 'Xeno direct',
+          note: 'Prebira reasoning vrstvu a sklada odpoved.',
+        },
+      ],
+    };
+  }
+
+  if (requestedSpeaker === 'Luna') {
+    return {
+      visible: true,
+      lunaActive: true,
+      xenoActive: consultXeno,
+      tracks: consultXeno
+        ? [
+            {
+              speaker: 'Luna',
+              title: 'Luna',
+              note: 'Drzi odpoved a posila Xeno strategic check.',
+            },
+            {
+              speaker: 'Xeno',
+              title: 'Xeno -> Luna',
+              note: 'Kontroluje rizika, strukturu a dalsi nejlepsi krok.',
+            },
+          ]
+        : [
+            {
+              speaker: 'Luna',
+              title: 'Luna',
+              note: 'Sklada primou odpoved bez Xeno handoffu.',
+            },
+          ],
+    };
+  }
+
+  return {
+    visible: true,
+    lunaActive: fallbackToLuna,
+    xenoActive: consultXeno,
+    tracks: consultXeno
+      ? [
+          {
+            speaker: 'Luna',
+            title: 'Luna',
+            note: 'Drzi hlavni odpoved a sklada uzivatelskou vrstvu.',
+          },
+          {
+            speaker: 'Xeno',
+            title: 'Xeno -> Luna',
+            note: 'Pridava planning, rizika a strategic support.',
+          },
+        ]
+      : fallbackToLuna
+        ? [
+            {
+              speaker: 'Luna',
+              title: 'Luna',
+              note: 'Drzi primou odpoved bez druhe vrstvy.',
+            },
+          ]
+        : [],
+  };
+}
+
+const idleThinkingState = {
+  visible: false,
+  lunaActive: false,
+  xenoActive: false,
+  tracks: [],
+};
+
+function normalizeCoordinationState(coordination, fallbackText = '') {
+  if (!coordination || typeof coordination !== 'object') {
+    return fallbackText ? createThinkingState(fallbackText) : idleThinkingState;
+  }
+
+  const lunaActive = Boolean(coordination.lunaActive);
+  const xenoActive = Boolean(coordination.xenoActive);
+  const tracks = Array.isArray(coordination.tracks)
+    ? coordination.tracks
+      .map((item) => ({
+        speaker: String(item?.speaker || '').trim(),
+        title: String(item?.title || item?.speaker || '').trim(),
+        note: String(item?.note || '').trim(),
+      }))
+      .filter((item) => item.speaker && item.note)
+    : [];
+
+  if (!lunaActive && !xenoActive && tracks.length === 0) {
+    return fallbackText ? createThinkingState(fallbackText) : idleThinkingState;
+  }
+
+  return {
+    visible: true,
+    lunaActive,
+    xenoActive,
+    tracks,
+  };
+}
+
 function buildRendererFallbackMeta() {
   const ua = navigator.userAgent || '';
   const platform = navigator.userAgentData?.platform || navigator.platform || 'desktop';
@@ -155,10 +275,11 @@ export default function App() {
   const [projectName, setProjectName] = useState('');
   const [projectType, setProjectType] = useState('investing');
   const [chatBusy, setChatBusy] = useState(false);
-  const [thinkingState, setThinkingState] = useState({ visible: false, xenoActive: false });
+  const [thinkingState, setThinkingState] = useState(idleThinkingState);
   const [revealingMessage, setRevealingMessage] = useState(null);
   const [pendingAction, setPendingAction] = useState({ active: false, title: '' });
   const revealTimerRef = useRef(null);
+  const revealActiveRef = useRef(false);
 
   const profileName = signedInAs ? signedInAs.split('@')[0] : 'Sakurai Haise';
   const notificationCount = initialNotifications.length;
@@ -300,10 +421,12 @@ export default function App() {
     clearRevealTimer();
     const normalizedText = String(fullText || '').trim();
     if (!normalizedText) {
+      revealActiveRef.current = false;
       commit?.();
       return;
     }
 
+    revealActiveRef.current = true;
     setRevealingMessage({ chatId, author, content: '', fullText: normalizedText });
     let index = 0;
     let lastTick = 0;
@@ -321,6 +444,7 @@ export default function App() {
 
       if (index >= normalizedText.length) {
         clearRevealTimer();
+        revealActiveRef.current = false;
         setRevealingMessage(null);
         commit?.();
         return;
@@ -338,6 +462,7 @@ export default function App() {
 
   useEffect(() => () => {
     clearRevealTimer();
+    revealActiveRef.current = false;
   }, []);
 
   useEffect(() => {
@@ -407,7 +532,7 @@ export default function App() {
 
     if (api?.sendMessage) {
       setChatBusy(true);
-      setThinkingState({ visible: true, xenoActive: shouldConsultXeno(baseText) });
+      setThinkingState(createThinkingState(baseText));
       try {
         const result = await api.sendMessage({ chatId: activeChatId, text: decoratedText });
         if (handleBackendResponseResult(result, 'Luna backend replied.')) {
@@ -427,8 +552,8 @@ export default function App() {
         setStatus('Backend bridge failed.');
       } finally {
         setChatBusy(false);
-        if (!revealingMessage) {
-          setThinkingState((current) => (current.visible ? { visible: false, xenoActive: false } : current));
+        if (!revealActiveRef.current) {
+          setThinkingState((current) => (current.visible ? idleThinkingState : current));
         }
       }
     } else {
@@ -436,7 +561,7 @@ export default function App() {
         ? `Luna prepared a ${mediaType} concept and saved it to Gallery.`
         : 'React + Electron shell accepted the request. IPC is prepared so Luna can later forward this to local AI, Xeno, or agent logic.';
 
-      setThinkingState({ visible: true, xenoActive: shouldConsultXeno(baseText) });
+      setThinkingState(createThinkingState(baseText));
       appendMessages(activeChatId, [
         { id: `user-${Date.now()}`, role: 'user', author: 'You', content: decoratedText },
       ]);
@@ -445,20 +570,23 @@ export default function App() {
           ? { ...chat, title: text.slice(0, 36) }
           : chat
       )));
-      setThinkingState({ visible: false, xenoActive: false });
+      const requestedSpeaker = getRequestedSpeaker(baseText);
+      const revealAuthor = requestedSpeaker === 'Xeno' ? 'Xeno' : 'Luna';
+
       startAssistantReveal({
         chatId: activeChatId,
-        author: /\bxeno(ai)?\b/i.test(baseText) || shouldConsultXeno(baseText) ? 'Xeno' : 'Luna',
+        author: revealAuthor,
         fullText: fallbackResponse,
         commit: () => {
           appendMessages(activeChatId, [
             {
               id: `assistant-${Date.now() + 1}`,
               role: 'assistant',
-              author: /\bxeno(ai)?\b/i.test(baseText) || shouldConsultXeno(baseText) ? 'Xeno' : 'Luna',
+              author: revealAuthor,
               content: fallbackResponse,
             },
           ]);
+          setThinkingState(idleThinkingState);
           setStatus('Message routed through the LunaAI renderer shell.');
         },
       });
@@ -486,6 +614,7 @@ export default function App() {
 
   function handleBackendResponseResult(result, successStatus) {
     if (!result?.ok) {
+      setThinkingState(idleThinkingState);
       setStatus(result?.message || 'Luna backend did not return a valid reply.');
       return false;
     }
@@ -493,16 +622,21 @@ export default function App() {
     const backendMessages = Array.isArray(result.messages) ? result.messages : [];
     const lastBackendMessage = backendMessages[backendMessages.length - 1];
     const canRevealAssistant = lastBackendMessage?.role === 'assistant' && String(lastBackendMessage.content || '').trim();
+    const coordinationState = normalizeCoordinationState(
+      result?.coordination,
+      String(lastBackendMessage?.content || ''),
+    );
 
     if (canRevealAssistant) {
       applyChatState(result, backendMessages.slice(0, -1));
-      setThinkingState({ visible: false, xenoActive: false });
+      setThinkingState(coordinationState);
       startAssistantReveal({
         chatId: result.currentChatId || currentChatId,
         author: lastBackendMessage.author || 'Luna',
         fullText: lastBackendMessage.content,
         commit: () => {
           applyBackendChatState(result);
+          setThinkingState(idleThinkingState);
           setStatus(successStatus);
         },
       });
@@ -510,6 +644,7 @@ export default function App() {
     }
 
     applyBackendChatState(result);
+    setThinkingState(idleThinkingState);
     setStatus(successStatus);
     return true;
   }
@@ -519,7 +654,7 @@ export default function App() {
     if (!api) return;
 
     setChatBusy(true);
-    setThinkingState({ visible: true, xenoActive: false });
+    setThinkingState({ visible: true, lunaActive: true, xenoActive: false });
     try {
       const result = kind === 'confirm'
         ? await api.confirmPendingAction()
@@ -539,8 +674,8 @@ export default function App() {
       setStatus(kind === 'confirm' ? 'Potvrzeni akce selhalo.' : 'Zruseni akce selhalo.');
     } finally {
       setChatBusy(false);
-      if (!revealingMessage) {
-        setThinkingState((current) => (current.visible ? { visible: false, xenoActive: false } : current));
+      if (!revealActiveRef.current) {
+        setThinkingState((current) => (current.visible ? idleThinkingState : current));
       }
     }
   }
