@@ -64,7 +64,50 @@ function PendingActionPanel({ pendingAction, onConfirmPendingAction, onCancelPen
   );
 }
 
-export default function ChatArea({ messages, chatId = '', thinkingState = null, revealingMessage = null, pendingAction = null, onConfirmPendingAction = null, onCancelPendingAction = null }) {
+function ScreenSharePanel({ screenShare, onStopScreenShare }) {
+  if (!screenShare?.active) return null;
+
+  return (
+    <aside className="screen-share-panel" aria-live="polite">
+      <div className="screen-share-panel-head">
+        <div>
+          <strong>Desktop Share</strong>
+          <span>{screenShare.label || 'Live preview for you, sampled frames for AI'}</span>
+        </div>
+        <button type="button" className="screen-share-panel-stop" onClick={onStopScreenShare}>
+          Stop
+        </button>
+      </div>
+      <div className="screen-share-panel-preview">
+        {screenShare.previewUrl ? (
+          <img src={screenShare.previewUrl} alt="Desktop share preview" />
+        ) : (
+          <div className="screen-share-panel-empty">Preparing preview…</div>
+        )}
+      </div>
+      <p>{screenShare.status || 'Luna a Xeno ctou prubezne obnovovane framy ze sdilene obrazovky.'}</p>
+      <div className={`screen-share-summary ${screenShare.summaryStatus === 'error' ? 'is-error' : ''}`}>
+        <div className="screen-share-summary-head">
+          <strong>Live vision summary</strong>
+          <span>{screenShare.analyzing ? 'Analyzingâ€¦' : (screenShare.summaryStatusLabel || 'Ready')}</span>
+        </div>
+        <p>{screenShare.visionSummary || 'Waiting for the first visual readout.'}</p>
+      </div>
+    </aside>
+  );
+}
+
+export default function ChatArea({
+  messages,
+  chatId = '',
+  thinkingState = null,
+  revealingMessage = null,
+  pendingAction = null,
+  onConfirmPendingAction = null,
+  onCancelPendingAction = null,
+  screenShare = null,
+  onStopScreenShare = null,
+}) {
   const hasMessages = messages.length > 0;
   const messagesPanelRef = useRef(null);
   const messagesEndRef = useRef(null);
@@ -134,6 +177,7 @@ export default function ChatArea({ messages, chatId = '', thinkingState = null, 
       </div>
 
       <div className="messages-panel" ref={messagesPanelRef}>
+        <ScreenSharePanel screenShare={screenShare} onStopScreenShare={onStopScreenShare} />
         <ThinkingPanel thinkingState={thinkingState} />
         {messages.map((message) => (
           <article key={message.id} className={`message-row ${message.role === 'user' ? 'is-user' : 'is-assistant'}`}>

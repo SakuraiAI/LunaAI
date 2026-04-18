@@ -34,8 +34,12 @@ class WorkflowManager:
                 automation_mode="learning",
                 reasoning_box="white_box",
                 user_input=user_input,
-                system_message="Mode changed to learning.",
-                instruction="Explain in detail, step by step, with examples and clear structure.",
+                system_message="Prepnula jsem se do learning rezimu.",
+                instruction=(
+                    "Explain step by step in clear adult language. "
+                    "Be precise, calm, and useful. "
+                    "Avoid filler and generic assistant phrasing."
+                ),
                 context=context,
                 strategy="explain",
             )
@@ -48,8 +52,11 @@ class WorkflowManager:
                 automation_mode="execution",
                 reasoning_box=self.select_reasoning_box(user_input, "collaboration"),
                 user_input=user_input,
-                system_message="Mode changed to collaboration.",
-                instruction="Help create, structure, and improve ideas with practical next steps.",
+                system_message="Prepnula jsem se do collaboration rezimu.",
+                instruction=(
+                    "Help build, structure, and improve ideas with practical next steps. "
+                    "Sound like an experienced collaborator, not a generic assistant."
+                ),
                 context=context,
                 strategy="act",
             )
@@ -57,7 +64,7 @@ class WorkflowManager:
         if text == "/auto":
             self.set_mode("auto", manual_override=False)
             decision = self.auto_mode.run(user_input)
-            decision.system_message = "Mode changed to auto. Luna will now choose the style automatically."
+            decision.system_message = "Jsem zpatky v auto rezimu. Styl odpovedi budu volit podle dotazu."
             decision.context = context
             return decision
 

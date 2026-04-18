@@ -34,6 +34,11 @@ NVIDIA_TIMEOUT_SECONDS = get_env_int("NVIDIA_TIMEOUT_SECONDS", 180)
 NVIDIA_REASONING_BUDGET = get_env_int("NVIDIA_REASONING_BUDGET", 16384)
 NVIDIA_ENABLE_THINKING = get_env_bool("NVIDIA_ENABLE_THINKING", True)
 
+VISION_NVIDIA_BASE_URL = get_env_str("VISION_NVIDIA_BASE_URL", "https://integrate.api.nvidia.com/v1")
+VISION_NVIDIA_MODEL = get_env_str("VISION_NVIDIA_MODEL", "nvidia/nemotron-nano-12b-v2-vl")
+VISION_NVIDIA_API_TOKEN = get_env_str("VISION_NVIDIA_API_TOKEN", NVIDIA_API_TOKEN)
+VISION_NVIDIA_TIMEOUT_SECONDS = get_env_int("VISION_NVIDIA_TIMEOUT_SECONDS", 180)
+
 INTERNET_ENABLED = get_env_bool("LUNA_INTERNET_ENABLED", True)
 INTERNET_MODE = get_env_str("LUNA_INTERNET_MODE", "auto")
 
@@ -66,6 +71,10 @@ class AppSettings:
     nvidia_timeout_seconds: int = NVIDIA_TIMEOUT_SECONDS
     nvidia_reasoning_budget: int = NVIDIA_REASONING_BUDGET
     nvidia_enable_thinking: bool = NVIDIA_ENABLE_THINKING
+    vision_nvidia_base_url: str = VISION_NVIDIA_BASE_URL
+    vision_nvidia_model: str = VISION_NVIDIA_MODEL
+    vision_nvidia_api_token: str = VISION_NVIDIA_API_TOKEN
+    vision_nvidia_timeout_seconds: int = VISION_NVIDIA_TIMEOUT_SECONDS
     internet_enabled: bool = INTERNET_ENABLED
     internet_mode: str = INTERNET_MODE
 
@@ -105,6 +114,10 @@ __all__ = [
     "NVIDIA_TIMEOUT_SECONDS",
     "NVIDIA_REASONING_BUDGET",
     "NVIDIA_ENABLE_THINKING",
+    "VISION_NVIDIA_BASE_URL",
+    "VISION_NVIDIA_MODEL",
+    "VISION_NVIDIA_API_TOKEN",
+    "VISION_NVIDIA_TIMEOUT_SECONDS",
     "INTERNET_ENABLED",
     "INTERNET_MODE",
 ]

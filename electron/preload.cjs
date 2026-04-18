@@ -9,6 +9,10 @@ contextBridge.exposeInMainWorld('lunaDesktop', {
   app: {
     getMeta: () => ipcRenderer.invoke('app:get-meta'),
   },
+  files: {
+    readAsDataUrl: (filePath) => ipcRenderer.invoke('files:read-as-data-url', filePath),
+    writeTempDataUrl: (payload) => ipcRenderer.invoke('files:write-temp-data-url', payload),
+  },
   settings: {
     getRuntime: () => ipcRenderer.invoke('settings:get-runtime'),
     saveRuntime: (payload) => ipcRenderer.invoke('settings:save-runtime', payload),
@@ -30,6 +34,9 @@ contextBridge.exposeInMainWorld('lunaDesktop', {
     renameChat: (chatId, title) => ipcRenderer.invoke('luna:rename-chat', chatId, title),
     deleteChat: (chatId) => ipcRenderer.invoke('luna:delete-chat', chatId),
     sendMessage: (payload) => ipcRenderer.invoke('luna:send-message', payload),
+    observeDesktop: (payload) => ipcRenderer.invoke('luna:observe-desktop', payload),
+    analyzeVisual: (payload) => ipcRenderer.invoke('luna:analyze-visual', payload),
+    setObserveMode: (enabled) => ipcRenderer.invoke('luna:set-observe-mode', enabled),
     confirmPendingAction: () => ipcRenderer.invoke('luna:confirm-pending-action'),
     cancelPendingAction: () => ipcRenderer.invoke('luna:cancel-pending-action'),
     futureAction: (payload) => ipcRenderer.invoke('luna:future-action', payload),

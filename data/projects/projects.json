@@ -72,8 +72,12 @@
         }
       ],
       "memory_entries": [
-        "Luna direction: ### Projekt „Build A Local“ – kompletní návrh (s Xenom)\n\n#### 1. Cíl\nVytvořit lokální AI‑asistované vývojové prostředí, které umožní programátorům psát, testova...",
-        "Chat focus: Sloz ze Xenem projekt",
+        "Desktop observe: Desktop app -> working in a desktop application | LunaAI | visual context captured",
+        "Luna direction: Na základě přiloženého snímku vidím jen to, co je na obrazovce v okamžiku pořízení – otevřený editor VS Code s vybraným souborem, průzkumník projektových složek...",
+        "Chat focus: a vidis co se deje v real time Z",
+        "Desktop observe: Desktop app -> working in a desktop application | LunaAI",
+        "Desktop observe: VS Code -> editing source code or configuration files | ● engine.py - LunaAI - Visual Studio Code | visual context captured",
+        "Desktop observe: Desktop app -> working in a desktop application | Překryvný prvek Výstřižků | visual context captured",
         "Agent action: Observe the active workspace state -> Luna desktop observation:\nActive window: Grioten, xlout - ADRENALINA // SPEED UP | YouTube Music - Google Chrome\nApp: Web browser\nProcess: chrome.exe (PID 12528)\nMeaning: watching or browsing YouTube\nMouse position: 1848, 836\nScreen size: 2560x1440\nDetected context: youtube\nDesktop observation captured.",
         "Desktop observe: Web browser -> watching or browsing YouTube | Grioten, xlout - ADRENALINA // SPEED UP | YouTube Music - Google Chrome",
         "Agent handoff: Agent handoff ready: Lock the first milestone. Immediate action: Agent can immediately prepare a clean scope document for review. Queued after that: Map the execution path | Prepare local workspace | Build the first working slice",

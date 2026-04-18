@@ -19,6 +19,7 @@ from app.memory.chat_memory import ChatMemory
 from app.memory.long_memory import LongMemory
 from app.models.local_model import LocalModel
 from app.models.nvidia_model import NvidiaModel
+from app.models.nvidia_vision_model import NvidiaVisionModel
 from app.tools.desktop_actions import DesktopActionTool
 from app.tools.desktop_observer import DesktopObserverTool
 from app.tools.internet import InternetTool
@@ -55,6 +56,12 @@ class LunaEngine:
             timeout_seconds=self.settings.nvidia_timeout_seconds,
             reasoning_budget=self.settings.nvidia_reasoning_budget,
             enable_thinking=self.settings.nvidia_enable_thinking,
+        )
+        self.vision_model = NvidiaVisionModel(
+            model_name=self.settings.vision_nvidia_model,
+            base_url=self.settings.vision_nvidia_base_url,
+            api_token=self.settings.vision_nvidia_api_token,
+            timeout_seconds=self.settings.vision_nvidia_timeout_seconds,
         )
         self.memory = ChatMemory(Path(self.settings.memory_path))
         self.long_memory = LongMemory(Path(self.settings.long_memory_path))
@@ -187,23 +194,23 @@ class LunaEngine:
         command = user_input.strip().lower()
         if command == "/internet on":
             self.internet.set_enabled(True)
-            return "Luna: Internet access enabled."
+            return "Luna: Internet jsem zapnula."
         if command == "/internet off":
             self.internet.set_enabled(False)
-            return "Luna: Internet access disabled."
+            return "Luna: Internet jsem vypnula."
         if command == "/internet auto":
             self.internet.set_enabled(True)
             self.internet.set_mode("auto")
-            return "Luna: Internet mode set to auto."
+            return "Luna: Internet necham na automatice."
         if command == "/internet manual":
             self.internet.set_mode("manual")
-            return "Luna: Internet mode set to manual."
+            return "Luna: Internet je ted jen rucne."
         if command == "/internet status":
             return self.internet.status()
         if user_input.startswith("/search "):
             query = user_input[8:].strip()
             if not query:
-                return "Luna: Please provide a search query."
+                return "Luna: Chybi mi dotaz pro hledani."
             return self.internet.search(query)
         return None
 
@@ -341,6 +348,7 @@ class LunaEngine:
                 "content": (
                     "You are XenoAI, Luna's reasoning layer. "
                     "Speak directly in Czech, be strategic, compact, clear, and grounded. "
+                    "Sound like an experienced technical partner, not a generic assistant. "
                     "Do not greet unless the user greeted first. "
                     "Do not expose internal reasoning or system notes."
                 ),
@@ -358,7 +366,7 @@ class LunaEngine:
             return self.model.generate(xeno_messages)
         except Exception as exc:
             self._last_support_model_source = "nvidia_error"
-            return f"Xeno: Reasoning layer neni dostupna. Details: {exc}"
+            return f"Xeno: Ted se mi nepodarilo pripojit reasoning vrstvu. Details: {exc}"
 
     def _is_local_model_failure(self, response: str) -> bool:
         lowered = str(response or "").strip().lower()
@@ -384,7 +392,7 @@ class LunaEngine:
                 return self.model.generate(messages)
             except Exception as exc:
                 self._last_primary_model_source = "nvidia_error"
-                return f"Luna: NVIDIA API neni dostupne. Details: {exc}"
+                return f"Luna: Ted se mi nepodarilo spojit s NVIDIA API. Details: {exc}"
 
         self._last_primary_model_source = "lm_studio"
         response = self.model.generate(messages)
@@ -555,6 +563,8 @@ class LunaEngine:
         note = f"Desktop observe: {app_label} -> {activity}"
         if title:
             note += f" | {title[:120]}"
+        if observation.get("vision_summary"):
+            note += " | visual context captured"
         self.projects.add_memory_entry(project.id, note)
 
     def _observer_context(self, *, refresh: bool = False) -> str:
@@ -576,12 +586,86 @@ class LunaEngine:
         ]
         if observation.get("url_hint"):
             lines.append(f"Detected context: {observation.get('url_hint')}")
+        if observation.get("screenshot_path"):
+            lines.append("User explicitly shared a fresh desktop screenshot for this context.")
+        if observation.get("vision_summary"):
+            lines.append(f"Vision summary: {observation.get('vision_summary')}")
         return "\n".join(lines)
+
+    def _vision_prompt_for_desktop(self) -> str:
+        return (
+            "Describe the current desktop scene for LunaAI. Focus on the active app, visible UI, "
+            "important text, what the user seems to be doing, and the next useful desktop-aware step."
+        )
+
+    def _analyze_visual_media(self, file_paths: list[str], query: str) -> str:
+        if not self.vision_model.is_available():
+            return ""
+
+        supported_paths = [path for path in file_paths if self.vision_model.supports_path(path)]
+        if not supported_paths:
+            return ""
+
+        try:
+            return self.vision_model.analyze_media(query=query, media_files=supported_paths[:4])
+        except Exception as error:
+            return f"Vision analysis was requested but failed: {error}"
+
+    def analyze_visual_media(self, file_paths: list[str], query: str = "") -> dict[str, object]:
+        cleaned_paths = [str(path).strip() for path in file_paths if str(path).strip()]
+        summary = self._analyze_visual_media(
+            cleaned_paths,
+            query.strip() or "Describe the visible scene, UI, text, and the most relevant activity on screen.",
+        )
+        return {
+            "ok": bool(summary.strip()),
+            "summary": summary,
+            "files": cleaned_paths,
+        }
+
+    def get_observe_mode_enabled(self) -> bool:
+        return bool(self.observe_mode_enabled)
+
+    def get_last_desktop_observation(self) -> dict[str, object]:
+        return dict(self.last_desktop_observation or {})
+
+    def capture_desktop_snapshot(self, include_screenshot: bool = False, *, remember: bool = True) -> dict[str, object]:
+        self._reload_runtime_preferences()
+        observation = self.desktop_observer.observe(include_screenshot=include_screenshot)
+        screenshot_path = str(observation.get("screenshot_path", "") or "").strip()
+        if include_screenshot and screenshot_path:
+            vision_summary = self._analyze_visual_media([screenshot_path], self._vision_prompt_for_desktop())
+            if vision_summary:
+                observation["vision_summary"] = vision_summary
+        self.last_desktop_observation = observation
+        summary = self.desktop_observer.summarize(observation)
+        if observation.get("vision_summary"):
+            summary = f"{summary}\n\nVision summary:\n{observation.get('vision_summary')}"
+        context = self._observer_context(refresh=False)
+        source = "desktop screenshot" if include_screenshot else "desktop observe"
+        detail = str(observation.get("inferred_activity", "") or observation.get("detail", "")).strip()
+        self._log_action("observe", source, "completed", detail)
+        if remember:
+            self._remember_observation(observation, source=source)
+        return {
+            "ok": True,
+            "summary": summary,
+            "context": context,
+            "observation": observation,
+            "observeModeEnabled": self.observe_mode_enabled,
+        }
 
     def observe_desktop(self, include_screenshot: bool = False, *, remember: bool = True) -> str:
         self._reload_runtime_preferences()
         observation = self.desktop_observer.observe(include_screenshot=include_screenshot)
+        screenshot_path = str(observation.get("screenshot_path", "") or "").strip()
+        if include_screenshot and screenshot_path:
+            vision_summary = self._analyze_visual_media([screenshot_path], self._vision_prompt_for_desktop())
+            if vision_summary:
+                observation["vision_summary"] = vision_summary
         summary = self.desktop_observer.summarize(observation)
+        if observation.get("vision_summary"):
+            summary = f"{summary}\n\nVision summary:\n{observation.get('vision_summary')}"
         title = "desktop screenshot" if include_screenshot else "desktop observe"
         detail = str(observation.get("inferred_activity", "")).strip() or str(observation.get("detail", ""))
         self._log_action("observe", title, "completed", detail)
@@ -608,9 +692,9 @@ class LunaEngine:
             observation = self.desktop_observer.observe(include_screenshot=False)
             self._remember_observation(observation, source="observe mode")
             self._log_action("observe", "observe mode", "enabled", str(observation.get("inferred_activity", "")))
-            return "Luna: Observe mode je aktivni. Budu brat desktop context jako dalsi vrstvu pri planovani i odpovedich."
+            return "Luna: Pozorovani obrazovky je zapnute. Budu s nim pocitat i pri dalsich odpovedich."
         self._log_action("observe", "observe mode", "disabled", "Observe mode disabled.")
-        return "Luna: Observe mode jsem vypnula."
+        return "Luna: Pozorovani obrazovky jsem vypnula."
 
     def _handle_observation_command(self, user_input: str) -> str | None:
         normalized = " ".join(user_input.strip().lower().split())
@@ -709,7 +793,7 @@ class LunaEngine:
     def format_recent_actions(self, limit: int = 8) -> str:
         entries = self.list_recent_actions(limit)
         if not entries:
-            return "No recent agent actions yet."
+            return "Zatim tu nejsou zadne nedavne akce."
         lines: list[str] = []
         for entry in entries:
             lines.append(f"[{entry['timestamp']}] {entry['status'].upper()} - {entry['title']}")
@@ -730,7 +814,7 @@ class LunaEngine:
             }
         result.setdefault("ok", True)
         result.setdefault("status", "completed")
-        result.setdefault("message", "Action finished.")
+        result.setdefault("message", "Hotovo.")
         result.setdefault("detail", str(result.get("message", "")).strip())
         result.setdefault("category", category)
         result.setdefault("action_key", title)
@@ -741,11 +825,11 @@ class LunaEngine:
         message = repair_text(str(result.get("message", "")).strip())
         detail = repair_text(str(result.get("detail", "")).strip())
         if pending:
-            return "Luna: Akce je pripravena. Potvrd ji pres Accept nebo ji zrus pres Cancel."
+            return "Luna: Akce je pripravena. Staci dat Accept, nebo ji zrusit pres Cancel."
         if status == "blocked":
-            return f"Luna: Akce je blokovana. {detail or message}".strip()
+            return f"Luna: Tuhle akci ted nemuzu spustit. {detail or message}".strip()
         if status == "failed":
-            return f"Luna: Akce se nepovedla. {detail or message}".strip()
+            return f"Luna: Tohle se nepovedlo. {detail or message}".strip()
         if status == "cancelled":
             return f"Luna: Akci jsem zrusila. {detail or message}".strip()
         return f"Luna: {message}".strip()
@@ -767,7 +851,7 @@ class LunaEngine:
     def _guarded_action(self, category: str, title: str, callback: Callable[[], object]) -> str:
         if self.pending_action is not None and self.pending_action[1] != title:
             current_title = self.pending_action[1]
-            return f"Luna: Nejdriv prosim potvrd nebo zrus cekajici akci `{current_title}` a potom muzu pripravit dalsi."
+            return f"Luna: Nejdriv prosim vyrid cekajici akci `{current_title}`. Pak muzu pripravit dalsi."
         if not self._is_action_allowed(category):
             result = self._coerce_action_result(
                 {
@@ -836,7 +920,7 @@ class LunaEngine:
         if normalized not in {"potvrd akci", "confirm action", "zrus akci", "cancel action"}:
             return None
         if self.pending_action is None:
-            return "Luna: Ted nemam zadnou cekajici akci k potvrzeni."
+            return "Luna: Ted tu nemam zadnou cekajici akci."
         category, title, callback = self.pending_action
         self.pending_action = None
         if normalized in {"zrus akci", "cancel action"}:
@@ -1140,7 +1224,7 @@ class LunaEngine:
             target = self._resolve_local_target(direct_path_match.group(1))
             if target is not None:
                 return self._guarded_action("path_open", f"open path {target}", lambda: self.desktop_actions.open_path(target))
-            return "Luna: Tu cestu jsem na pocitaci nenasla."
+            return "Luna: Tu cestu jsem v pocitaci nenasla."
 
         command_patterns = [
             (r'(?:otevri|otev?i|open) (?:soubor|file) (.+)$', False),
@@ -1156,13 +1240,13 @@ class LunaEngine:
             if target is None:
                 target = self._find_named_target(raw_target, prefer_directory=prefer_directory)
             if target is None:
-                return "Luna: Ten soubor nebo slozku jsem na pocitaci nenasla."
+                return "Luna: Ten soubor nebo slozku jsem v pocitaci nenasla."
             return self._guarded_action("path_open", f"open path {target}", lambda: self.desktop_actions.open_path(target))
 
         if any(phrase in lowered for phrase in ["otevri workspace ve vscode", "otev?i workspace ve vscode", "open workspace in vscode", "otevri projekt ve vscode", "otev?i projekt ve vscode", "open project in vscode"]):
             current_project = self.projects.get_current_project()
             if current_project is None:
-                return "Luna: Ted nemam aktivni projekt, takze nemam jaky workspace otevrit ve VS Code."
+                return "Luna: Ted nemam aktivni projekt, takze nemam co otevrit ve VS Code."
 
             def open_workspace_in_vscode() -> str:
                 result = self.open_connected_app("vscode", current_project.name)
@@ -1176,7 +1260,7 @@ class LunaEngine:
         if any(phrase in lowered for phrase in ["otevri projekt", "otev?i projekt", "open project", "otevri workspace", "otev?i workspace", "open workspace"]):
             current_project = self.projects.get_current_project()
             if current_project is None:
-                return "Luna: Ted nemam aktivni projekt, takze nemam jaky workspace otevrit."
+                return "Luna: Ted nemam aktivni projekt, takze nemam co otevrit."
             workspace = self.desktop_actions.ensure_project_workspace(current_project.name)
             return self._guarded_action("path_open", f"open workspace {workspace}", lambda: self.desktop_actions.open_path(workspace))
 
@@ -1220,7 +1304,7 @@ class LunaEngine:
                     message = str(result.get("message", "")).strip()
                     if result.get("ok"):
                         return message
-                    raise OSError(message or "App could not be opened.")
+                    raise OSError(message or "Aplikaci se nepodarilo otevrit.")
 
                 return self._guarded_action("app_launch", f"open {app_key}", launch_app)
 
@@ -1341,7 +1425,7 @@ class LunaEngine:
             intelligence_level=intelligence_level,
         )
 
-    def chat(self, user_input: str) -> str:
+    def chat(self, user_input: str, *, extra_context: str = "") -> str:
         self._reload_runtime_preferences()
         self.last_coordination = {
             "lunaActive": False,
@@ -1352,7 +1436,7 @@ class LunaEngine:
         if not cleaned_input:
             return ""
         if cleaned_input.lower() == "exit":
-            return "Luna: Goodbye."
+            return "Luna: Dobre. Az budes chtit pokracovat, jsem tady."
 
         pending_action_result = self._handle_pending_action_command(cleaned_input)
         if pending_action_result is not None:
@@ -1404,6 +1488,9 @@ class LunaEngine:
         coordination_prompt = self._format_coordination_prompt(coordination)
         if coordination_prompt:
             hidden_support = (f"{coordination_prompt}\n\n{hidden_support}".strip() if hidden_support else coordination_prompt)
+        extra_context = str(extra_context or "").strip()
+        if extra_context:
+            hidden_support = (f"{hidden_support}\n\n{extra_context}".strip() if hidden_support else extra_context)
         if self.observe_mode_enabled:
             observer_context = self._observer_context(refresh=self._observer_refresh_enabled())
             if observer_context:
@@ -1429,7 +1516,7 @@ class LunaEngine:
         else:
             response = self._generate_primary_response(messages)
         if not str(response).strip():
-            response = "Luna: Nic jsem z modelu nedostala. Zkus to prosim znovu."
+            response = "Luna: Tentokrat z modelu nic rozumneho neprislo. Zkus to prosim jeste jednou."
         debug_footer = self._build_model_debug_footer(xeno_consulted=xeno_consulted)
         self.last_model_debug = debug_footer
         response = str(response).rstrip()
@@ -1789,11 +1876,16 @@ class LunaEngine:
         if not file_paths:
             return ""
         allowed_suffixes = {".txt", ".md", ".py", ".json", ".yaml", ".yml", ".csv", ".log", ".ini", ".toml", ".js", ".ts", ".tsx", ".jsx", ".html", ".css"}
+        visual_suffixes = {".png", ".jpg", ".jpeg", ".webp", ".mp4", ".webm", ".mov"}
         parts: list[str] = []
+        visual_paths: list[str] = []
         for raw_path in file_paths[:4]:
             path = Path(raw_path)
             if not path.exists():
                 parts.append(f"File {path.name} could not be found locally.")
+                continue
+            if path.suffix.lower() in visual_suffixes:
+                visual_paths.append(str(path))
                 continue
             if path.suffix.lower() not in allowed_suffixes:
                 parts.append(f"File {path.name} attached as a binary or unsupported format.")
@@ -1808,6 +1900,14 @@ class LunaEngine:
                 parts.append(f"File {path.name} is attached but empty.")
                 continue
             parts.append(f"Attached file: {path.name}\n{snippet}")
+        if visual_paths:
+            visual_summary = self._analyze_visual_media(
+                visual_paths,
+                "Describe the attached visual media for LunaAI and Xeno. Focus on visible UI, text, activity, and what matters for the user's task.",
+            )
+            if visual_summary:
+                names = ", ".join(Path(path).name for path in visual_paths)
+                parts.append(f"Visual attachment analysis ({names}):\n{visual_summary}")
         return "\n\n".join(parts)
 
     def generate_project_package(self, user_input: str, project_name: str = "") -> dict[str, object]:

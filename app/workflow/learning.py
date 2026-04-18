@@ -11,8 +11,8 @@ class LearningWorkflow:
             reasoning_box="white_box",
             instruction=(
                 "Explain in detail and teach step by step. "
-                "Use clear structure, simple language, and practical examples. "
-                "When useful, break the answer into parts and go deeper than a short summary."
+                "Use clear structure, adult language, and practical examples. "
+                "Be patient and precise, but do not sound patronizing or generic."
             ),
             user_input=user_input,
         )

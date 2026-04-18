@@ -23,7 +23,17 @@ function VoiceIcon() {
   );
 }
 
-export default function ChatInput({ value, onChange, onSend, onAction, attachment, onClearAttachment, centered = false }) {
+export default function ChatInput({
+  value,
+  onChange,
+  onSend,
+  onAction,
+  attachment,
+  onClearAttachment,
+  screenShare,
+  onStopScreenShare,
+  centered = false,
+}) {
   const [menuOpen, setMenuOpen] = useState(false);
   const fileInputRef = useRef(null);
   const menuRef = useRef(null);
@@ -85,6 +95,10 @@ export default function ChatInput({ value, onChange, onSend, onAction, attachmen
         {menuOpen && (
           <div className="chat-plus-menu">
             <button type="button" onClick={() => fileInputRef.current?.click()}>Add file</button>
+            <button type="button" onClick={() => { onAction('screenshot'); setMenuOpen(false); }}>Capture screen</button>
+            <button type="button" onClick={() => { onAction('share-screen'); setMenuOpen(false); }}>
+              {screenShare?.active ? 'Restart desktop share' : 'Share desktop'}
+            </button>
             <button type="button" onClick={handleGenerateImage}>Generate image</button>
           </div>
         )}
@@ -92,6 +106,18 @@ export default function ChatInput({ value, onChange, onSend, onAction, attachmen
       </div>
 
       <div className="chat-input-main">
+        {screenShare?.active && (
+          <div className={`attachment-chip screen-share-chip ${screenShare.previewUrl ? 'is-image' : ''}`}>
+            {screenShare.previewUrl && (
+              <img src={screenShare.previewUrl} alt="Desktop stream preview" className="attachment-preview" />
+            )}
+            <div className="screen-share-copy">
+              <span>{screenShare.label || 'Desktop share je aktivni'}</span>
+              <small>{screenShare.status || 'Luna a Xeno ctou prubezne obnovovane framy ze sdilene obrazovky.'}</small>
+            </div>
+            <button type="button" onClick={onStopScreenShare} aria-label="Stop desktop share">x</button>
+          </div>
+        )}
         {attachment && (
           <div className={`attachment-chip ${isImageAttachment ? 'is-image' : ''}`}>
             {isImageAttachment && <img src={attachment.previewUrl} alt={attachment.name} className="attachment-preview" />}

@@ -28,10 +28,16 @@ class _BridgeEngine(Protocol):
     def switch_chat(self, session_id: str) -> list[dict[str, str]]: ...
     def rename_chat(self, session_id: str, title: str) -> str: ...
     def delete_chat(self, session_id: str) -> str: ...
-    def chat(self, user_input: str) -> str: ...
+    def chat(self, user_input: str, *, extra_context: str = "") -> str: ...
     def confirm_pending_action(self) -> str: ...
     def cancel_pending_action(self) -> str: ...
     def get_last_coordination(self) -> dict[str, Any]: ...
+    def get_observe_mode_enabled(self) -> bool: ...
+    def get_last_desktop_observation(self) -> dict[str, Any]: ...
+    def set_observe_mode(self, enabled: bool) -> str: ...
+    def capture_desktop_snapshot(self, include_screenshot: bool = False, *, remember: bool = True) -> dict[str, Any]: ...
+    def read_attachment_context(self, file_paths: list[str]) -> str: ...
+    def analyze_visual_media(self, file_paths: list[str], query: str = "") -> dict[str, Any]: ...
 
 
 def _message_author(item: dict[str, str]) -> str:
@@ -87,6 +93,8 @@ def _state(engine: _BridgeEngine) -> dict[str, Any]:
         "messages": messages,
         "pendingAction": pending_action,
         "coordination": engine.get_last_coordination(),
+        "observeModeEnabled": engine.get_observe_mode_enabled(),
+        "lastObservation": engine.get_last_desktop_observation(),
     }
 
 
@@ -125,6 +133,10 @@ def main() -> int:
     elif action == "send_message":
         chat_id = str(payload.get("chatId", "") or "")
         text = str(payload.get("text", "") or "")
+        extra_context = str(payload.get("extraContext", "") or "").strip()
+        raw_file_paths = payload.get("filePaths", [])
+        file_paths = [str(item).strip() for item in raw_file_paths] if isinstance(raw_file_paths, list) else []
+        attachment_context = engine.read_attachment_context([path for path in file_paths if path])
         force_action_execution = bool(payload.get("forceActionExecution", False))
         if chat_id:
             engine.switch_chat(chat_id)
@@ -133,10 +145,30 @@ def main() -> int:
         if force_action_execution:
             engine._action_mode_override = "auto"
         try:
-            response = engine.chat(text)
+            combined_context = "\n\n".join(
+                part for part in [extra_context, attachment_context] if str(part or "").strip()
+            )
+            response = engine.chat(text, extra_context=combined_context)
         finally:
             engine.user_settings.data.agent_execution_mode = original_mode
             engine._action_mode_override = original_override
+        result = _state(engine)
+        result["response"] = response
+    elif action == "observe_desktop":
+        include_screenshot = bool(payload.get("includeScreenshot", False))
+        snapshot = engine.capture_desktop_snapshot(include_screenshot=include_screenshot, remember=True)
+        result = _state(engine)
+        result.update(snapshot)
+    elif action == "analyze_visual":
+        raw_file_paths = payload.get("filePaths", [])
+        file_paths = [str(item).strip() for item in raw_file_paths] if isinstance(raw_file_paths, list) else []
+        query = str(payload.get("query", "") or "")
+        analysis = engine.analyze_visual_media(file_paths, query=query)
+        result = _state(engine)
+        result.update(analysis)
+    elif action == "set_observe_mode":
+        enabled = bool(payload.get("enabled", False))
+        response = engine.set_observe_mode(enabled)
         result = _state(engine)
         result["response"] = response
     elif action == "confirm_pending_action":

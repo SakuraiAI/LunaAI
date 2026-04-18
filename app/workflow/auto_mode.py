@@ -65,21 +65,24 @@ class AutoMode:
         if strategy == "explain":
             instruction = (
                 "Auto mode selected explanation-first. "
-                "Give a more detailed answer, clarify the idea, and include examples when useful."
+                "Answer like a capable human colleague: clear, calm, and specific. "
+                "Give enough detail to be useful, but skip filler."
             )
             automation_mode = "learning"
             reasoning_box = "white_box"
         elif strategy == "act":
             instruction = (
                 "Auto mode selected action-first. "
-                "Focus on concrete steps, useful structure, and practical execution."
+                "Focus on concrete steps, useful structure, and practical execution. "
+                "Keep the tone composed and direct."
             )
             automation_mode = "execution"
             reasoning_box = "black_box"
         else:
             instruction = (
                 "Auto mode selected a balanced response. "
-                "Combine a clear explanation with practical next steps."
+                "Combine a clear explanation with practical next steps. "
+                "Keep the answer natural and avoid generic assistant filler."
             )
             automation_mode = "balanced"
             reasoning_box = "black_box"

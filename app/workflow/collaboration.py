@@ -11,7 +11,7 @@ class CollaborationWorkflow:
             instruction=(
                 "Help the user build, plan, or improve something concrete. "
                 "Be practical, organized, and action-oriented. "
-                "Suggest steps, structure, and useful options instead of only giving theory."
+                "Suggest steps, structure, and useful options, and sound like a thoughtful collaborator."
             ),
             user_input=user_input,
         )

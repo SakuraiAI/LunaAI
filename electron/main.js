@@ -2,6 +2,7 @@ import { app, BrowserWindow, ipcMain } from 'electron';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import os from 'node:os';
+import fs from 'node:fs/promises';
 
 import { readRuntimeSettings, writeRuntimeSettings } from './services/runtimeSettings.js';
 import { buildUpdateFeed, openUpdateDownload } from './services/updates.js';
@@ -138,6 +139,70 @@ ipcMain.handle('app:get-meta', () => {
   };
 });
 
+ipcMain.handle('files:read-as-data-url', async (_, filePath) => {
+  const targetPath = String(filePath || '').trim();
+  if (!targetPath) {
+    return { ok: false, message: 'Missing file path.' };
+  }
+
+  try {
+    const fileBuffer = await fs.readFile(targetPath);
+    const extension = path.extname(targetPath).toLowerCase();
+    const mimeByExtension = {
+      '.png': 'image/png',
+      '.jpg': 'image/jpeg',
+      '.jpeg': 'image/jpeg',
+      '.webp': 'image/webp',
+      '.gif': 'image/gif',
+    };
+    const mime = mimeByExtension[extension] || 'application/octet-stream';
+    return {
+      ok: true,
+      dataUrl: `data:${mime};base64,${fileBuffer.toString('base64')}`,
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      message: String(error),
+    };
+  }
+});
+
+ipcMain.handle('files:write-temp-data-url', async (_, payload) => {
+  const dataUrl = String(payload?.dataUrl || '').trim();
+  const extension = String(payload?.extension || 'png').trim().replace(/^\.+/, '').toLowerCase() || 'png';
+  const previousPath = String(payload?.previousPath || '').trim();
+  const tempRoot = path.join(app.getPath('userData'), 'stream-captures');
+
+  if (!dataUrl.startsWith('data:')) {
+    return { ok: false, message: 'Invalid data URL payload.' };
+  }
+
+  try {
+    await fs.mkdir(tempRoot, { recursive: true });
+
+    const [header, encoded] = dataUrl.split(',', 2);
+    if (!header || !encoded) {
+      return { ok: false, message: 'Malformed data URL.' };
+    }
+
+    const nextPath = path.join(tempRoot, `stream_${Date.now()}.${extension}`);
+    const buffer = Buffer.from(encoded, 'base64');
+    await fs.writeFile(nextPath, buffer);
+
+    if (previousPath) {
+      const normalizedPrevious = path.resolve(previousPath);
+      if (normalizedPrevious.startsWith(path.resolve(tempRoot))) {
+        await fs.unlink(normalizedPrevious).catch(() => {});
+      }
+    }
+
+    return { ok: true, path: nextPath };
+  } catch (error) {
+    return { ok: false, message: String(error) };
+  }
+});
+
 ipcMain.handle('settings:get-runtime', () => {
   return readRuntimeSettings();
 });
@@ -195,6 +260,18 @@ ipcMain.handle('luna:delete-chat', async (_, chatId) => {
 
 ipcMain.handle('luna:send-message', async (_, payload) => {
   return await runLunaChatAction({ action: 'send_message', ...(payload || {}) });
+});
+
+ipcMain.handle('luna:observe-desktop', async (_, payload) => {
+  return mergePendingLunaAction(await runLunaBridge({ action: 'observe_desktop', ...(payload || {}) }));
+});
+
+ipcMain.handle('luna:analyze-visual', async (_, payload) => {
+  return mergePendingLunaAction(await runLunaBridge({ action: 'analyze_visual', ...(payload || {}) }));
+});
+
+ipcMain.handle('luna:set-observe-mode', async (_, enabled) => {
+  return mergePendingLunaAction(await runLunaBridge({ action: 'set_observe_mode', enabled: Boolean(enabled) }));
 });
 
 ipcMain.handle('luna:confirm-pending-action', async () => {

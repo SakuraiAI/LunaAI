@@ -101,6 +101,21 @@ function buildGalleryTitle(text, mediaType) {
   return cleaned.slice(0, 48);
 }
 
+function toLocalFileUrl(filePath) {
+  const normalized = String(filePath || '').trim().replace(/\\/g, '/');
+  if (!normalized) return '';
+  if (/^file:\/\//i.test(normalized)) return normalized;
+  return encodeURI(`file:///${normalized.replace(/^\/+/, '')}`);
+}
+
+async function readLocalPreviewDataUrl(filePath) {
+  const targetPath = String(filePath || '').trim();
+  const api = window.lunaDesktop?.files;
+  if (!targetPath || !api?.readAsDataUrl) return '';
+  const result = await api.readAsDataUrl(targetPath).catch(() => null);
+  return result?.ok && result?.dataUrl ? String(result.dataUrl) : '';
+}
+
 function shouldConsultXeno(text) {
   return /\b(navrhni|architektura|architekturu|rizika|tok dat|rozdelej|faze|f?ze|kroky|implementace|plan|pl[a?]n|workspace|strategi|system)\b/i.test(text);
 }
@@ -255,7 +270,10 @@ export default function App() {
   const [profileOpen, setProfileOpen] = useState(false);
   const [notificationsOpen, setNotificationsOpen] = useState(false);
   const [search, setSearch] = useState('');
-  const [page, setPage] = useState(() => window.localStorage.getItem(STORAGE_KEYS.page) || 'chat');
+  const [page, setPage] = useState(() => {
+    const storedPage = window.localStorage.getItem(STORAGE_KEYS.page) || 'chat';
+    return storedPage === 'eyes' ? 'chat' : storedPage;
+  });
   const [chats, setChats] = useState(() => readStoredJson(STORAGE_KEYS.chats, initialChats));
   const [currentChatId, setCurrentChatId] = useState(() => window.localStorage.getItem(STORAGE_KEYS.currentChatId) || initialChats[0]?.id || '');
   const [chatMessages, setChatMessages] = useState(() => readStoredJson(STORAGE_KEYS.messages, buildInitialChatThreads()));
@@ -266,6 +284,21 @@ export default function App() {
   const [selectedApplicationId, setSelectedApplicationId] = useState('');
   const [composer, setComposer] = useState('');
   const [attachment, setAttachment] = useState(null);
+  const [observeModeEnabled, setObserveModeEnabled] = useState(false);
+  const [pendingDesktopContext, setPendingDesktopContext] = useState(null);
+  const [desktopObservation, setDesktopObservation] = useState(null);
+  const [desktopPreviewUrl, setDesktopPreviewUrl] = useState('');
+  const [screenShare, setScreenShare] = useState({
+    active: false,
+    label: '',
+    previewUrl: '',
+    framePath: '',
+    status: '',
+    visionSummary: '',
+    summaryStatus: 'idle',
+    summaryStatusLabel: 'Ready',
+    analyzing: false,
+  });
   const [status, setStatus] = useState('LunaAI desktop shell ready.');
   const [contextMenu, setContextMenu] = useState({ visible: false, x: 0, y: 0, kind: 'chat', targetId: '', title: '', saved: false });
   const [appMeta, setAppMeta] = useState(fallbackMeta);
@@ -275,11 +308,19 @@ export default function App() {
   const [projectName, setProjectName] = useState('');
   const [projectType, setProjectType] = useState('investing');
   const [chatBusy, setChatBusy] = useState(false);
+  const [eyesBusy, setEyesBusy] = useState(false);
   const [thinkingState, setThinkingState] = useState(idleThinkingState);
   const [revealingMessage, setRevealingMessage] = useState(null);
   const [pendingAction, setPendingAction] = useState({ active: false, title: '' });
   const revealTimerRef = useRef(null);
   const revealActiveRef = useRef(false);
+  const screenShareStreamRef = useRef(null);
+  const screenShareIntervalRef = useRef(null);
+  const screenShareVideoRef = useRef(null);
+  const screenShareCanvasRef = useRef(null);
+  const latestScreenSharePathRef = useRef('');
+  const screenShareAnalysisBusyRef = useRef(false);
+  const screenShareLastAnalyzedAtRef = useRef(0);
 
   const profileName = signedInAs ? signedInAs.split('@')[0] : 'Sakurai Haise';
   const notificationCount = initialNotifications.length;
@@ -291,6 +332,46 @@ export default function App() {
       URL.revokeObjectURL(attachment.previewUrl);
     }
   }, [attachment]);
+
+  useEffect(() => () => {
+    if (screenShareIntervalRef.current) {
+      window.clearInterval(screenShareIntervalRef.current);
+      screenShareIntervalRef.current = null;
+    }
+    const currentStream = screenShareStreamRef.current;
+    if (currentStream) {
+      currentStream.getTracks().forEach((track) => track.stop());
+      screenShareStreamRef.current = null;
+    }
+  }, []);
+
+  useEffect(() => {
+    const screenshotPath = String(desktopObservation?.screenshot_path || '').trim();
+    const api = window.lunaDesktop?.files;
+
+    if (!screenshotPath || !api?.readAsDataUrl) {
+      setDesktopPreviewUrl('');
+      return undefined;
+    }
+
+    let cancelled = false;
+
+    async function loadPreview() {
+      const result = await api.readAsDataUrl(screenshotPath).catch(() => null);
+      if (cancelled) return;
+      if (result?.ok && result?.dataUrl) {
+        setDesktopPreviewUrl(String(result.dataUrl));
+      } else {
+        setDesktopPreviewUrl('');
+      }
+    }
+
+    loadPreview();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [desktopObservation?.screenshot_path]);
 
   useEffect(() => {
     const api = window.lunaDesktop;
@@ -401,6 +482,15 @@ export default function App() {
       active: Boolean(result?.pendingAction?.active),
       title: String(result?.pendingAction?.title || ''),
     });
+    if (typeof result?.observeModeEnabled === 'boolean') {
+      setObserveModeEnabled(result.observeModeEnabled);
+    }
+    if (result?.lastObservation && typeof result.lastObservation === 'object') {
+      setDesktopObservation(result.lastObservation);
+    }
+    if (result?.observation && typeof result.observation === 'object') {
+      setDesktopObservation(result.observation);
+    }
     if (Array.isArray(overrideMessages) && typeof result.currentChatId === 'string') {
       setChatMessages((current) => ({
         ...current,
@@ -460,6 +550,311 @@ export default function App() {
     return applyChatState(result);
   }
 
+  function clearScreenShareLoop() {
+    if (screenShareIntervalRef.current) {
+      window.clearInterval(screenShareIntervalRef.current);
+      screenShareIntervalRef.current = null;
+    }
+  }
+
+  function stopScreenShare({ message } = {}) {
+    clearScreenShareLoop();
+    const currentStream = screenShareStreamRef.current;
+    if (currentStream) {
+      currentStream.getTracks().forEach((track) => track.stop());
+      screenShareStreamRef.current = null;
+    }
+    if (screenShareVideoRef.current) {
+      screenShareVideoRef.current.srcObject = null;
+    }
+    latestScreenSharePathRef.current = '';
+    screenShareAnalysisBusyRef.current = false;
+    screenShareLastAnalyzedAtRef.current = 0;
+    setScreenShare({
+      active: false,
+      label: '',
+      previewUrl: '',
+      framePath: '',
+      status: '',
+      visionSummary: '',
+      summaryStatus: 'idle',
+      summaryStatusLabel: 'Ready',
+      analyzing: false,
+    });
+    if (message) {
+      setStatus(message);
+    }
+  }
+
+  function ensureScreenShareNodes() {
+    if (!screenShareVideoRef.current) {
+      const video = document.createElement('video');
+      video.autoplay = true;
+      video.muted = true;
+      video.playsInline = true;
+      screenShareVideoRef.current = video;
+    }
+    if (!screenShareCanvasRef.current) {
+      screenShareCanvasRef.current = document.createElement('canvas');
+    }
+    return {
+      video: screenShareVideoRef.current,
+      canvas: screenShareCanvasRef.current,
+    };
+  }
+
+  async function captureSharedDesktopFrame() {
+    const currentStream = screenShareStreamRef.current;
+    const api = window.lunaDesktop?.files;
+    if (!currentStream || !api?.writeTempDataUrl) return '';
+
+    const { video, canvas } = ensureScreenShareNodes();
+    if (!video.videoWidth || !video.videoHeight) {
+      return '';
+    }
+
+    const targetWidth = Math.min(video.videoWidth, 1440);
+    const scale = targetWidth / video.videoWidth;
+    canvas.width = Math.max(1, Math.round(video.videoWidth * scale));
+    canvas.height = Math.max(1, Math.round(video.videoHeight * scale));
+
+    const context = canvas.getContext('2d', { alpha: false });
+    if (!context) return '';
+
+    context.drawImage(video, 0, 0, canvas.width, canvas.height);
+    const dataUrl = canvas.toDataURL('image/png');
+    const result = await api.writeTempDataUrl({
+      dataUrl,
+      extension: 'png',
+      previousPath: latestScreenSharePathRef.current,
+    }).catch(() => null);
+
+    if (!result?.ok || !result?.path) {
+      return '';
+    }
+
+    latestScreenSharePathRef.current = String(result.path);
+    setScreenShare((current) => ({
+      ...current,
+      active: true,
+      previewUrl: dataUrl,
+      framePath: String(result.path),
+      status: 'Desktop share je aktivni. Luna a Xeno ctou prubezne obnovovane framy ze sdilene obrazovky.',
+    }));
+    return String(result.path);
+  }
+
+  async function refreshScreenShareVisionSummary(framePath, { force = false } = {}) {
+    const api = window.lunaDesktop?.luna;
+    const targetPath = String(framePath || '').trim();
+    if (!targetPath || !api?.analyzeVisual) return;
+
+    const now = Date.now();
+    if (!force && screenShareAnalysisBusyRef.current) return;
+    if (!force && now - screenShareLastAnalyzedAtRef.current < 15000) return;
+
+    screenShareAnalysisBusyRef.current = true;
+    setScreenShare((current) => ({
+      ...current,
+      analyzing: true,
+      summaryStatus: current.visionSummary ? current.summaryStatus : 'working',
+      summaryStatusLabel: 'Reading',
+    }));
+
+    try {
+      const result = await api.analyzeVisual({
+        filePaths: [targetPath],
+        query: 'Describe the currently shared desktop frame for LunaAI and Xeno. Focus on the visible app, UI, important text, and what the user is doing right now.',
+      });
+      const summary = String(result?.summary || '').trim();
+      screenShareLastAnalyzedAtRef.current = Date.now();
+      setScreenShare((current) => ({
+        ...current,
+        analyzing: false,
+        visionSummary: summary || current.visionSummary || 'Vision model did not return a useful summary.',
+        summaryStatus: summary ? 'ok' : 'warning',
+        summaryStatusLabel: summary ? 'Live' : 'No summary',
+      }));
+    } catch {
+      setScreenShare((current) => ({
+        ...current,
+        analyzing: false,
+        summaryStatus: 'error',
+        summaryStatusLabel: 'Unavailable',
+        visionSummary: current.visionSummary || 'Vision summary is temporarily unavailable.',
+      }));
+    } finally {
+      screenShareAnalysisBusyRef.current = false;
+    }
+  }
+
+  async function startScreenShare() {
+    if (!navigator.mediaDevices?.getDisplayMedia) {
+      setStatus('Desktop sharing is not available in this environment.');
+      return;
+    }
+
+    stopScreenShare({});
+
+    try {
+      const stream = await navigator.mediaDevices.getDisplayMedia({
+        video: {
+          frameRate: { ideal: 1, max: 2 },
+        },
+        audio: false,
+      });
+
+      const track = stream.getVideoTracks()[0];
+      if (!track) {
+        stopScreenShare({ message: 'Desktop sharing did not provide a video track.' });
+        return;
+      }
+
+      track.addEventListener('ended', () => {
+        stopScreenShare({ message: 'Desktop sharing was stopped.' });
+      });
+
+      const { video } = ensureScreenShareNodes();
+      video.srcObject = stream;
+      if (video.readyState < 1) {
+        await new Promise((resolve) => {
+          const handleLoaded = () => {
+            video.removeEventListener('loadedmetadata', handleLoaded);
+            resolve();
+          };
+          video.addEventListener('loadedmetadata', handleLoaded);
+        });
+      }
+      await video.play().catch(() => {});
+
+      screenShareStreamRef.current = stream;
+      setScreenShare({
+        active: true,
+        label: track.label || 'Desktop stream',
+        previewUrl: '',
+        framePath: '',
+        status: 'Desktop share se spousti. Pripravuju prvni frame a prvni vision shrnuti.',
+        visionSummary: '',
+        summaryStatus: 'working',
+        summaryStatusLabel: 'Starting',
+        analyzing: false,
+      });
+
+      const firstFramePath = await captureSharedDesktopFrame();
+      if (firstFramePath) {
+        await refreshScreenShareVisionSummary(firstFramePath, { force: true });
+      }
+
+      clearScreenShareLoop();
+      screenShareIntervalRef.current = window.setInterval(() => {
+        captureSharedDesktopFrame().then((nextFramePath) => {
+          if (nextFramePath) {
+            refreshScreenShareVisionSummary(nextFramePath);
+          }
+        });
+      }, 5000);
+
+      setStatus('Desktop share je aktivni. Luna a Xeno ted pracuji s prubezne obnovovanymi framy ze sdilene obrazovky.');
+    } catch {
+      stopScreenShare({ message: 'Desktop sharing was not started.' });
+    }
+  }
+
+  async function requestDesktopObservation(includeScreenshot = false, { silent = false } = {}) {
+    const api = window.lunaDesktop?.luna;
+    if (!api?.observeDesktop) {
+      if (!silent) {
+        setStatus('Desktop observe works only inside the Electron desktop shell.');
+      }
+      return null;
+    }
+
+    try {
+      setEyesBusy(true);
+      const result = await api.observeDesktop({ includeScreenshot });
+      applyBackendChatState(result);
+
+      const context = String(result?.context || '').trim();
+      if (context) {
+        setPendingDesktopContext({
+          context,
+          includeScreenshot,
+          summary: String(result?.summary || '').trim(),
+        });
+      }
+
+      const screenshotPath = String(result?.observation?.screenshot_path || '').trim();
+      if (includeScreenshot && screenshotPath) {
+        const previewDataUrl = await readLocalPreviewDataUrl(screenshotPath);
+        setAttachment((current) => {
+          if (current?.previewUrl?.startsWith('blob:')) URL.revokeObjectURL(current.previewUrl);
+          return {
+            name: screenshotPath.split(/[/\\]/).pop() || 'desktop.png',
+            type: 'image/png',
+            path: screenshotPath,
+            source: 'desktop-capture',
+            previewUrl: previewDataUrl || toLocalFileUrl(screenshotPath),
+          };
+        });
+      }
+
+      if (!silent) {
+        const detail = String(result?.observation?.detail || '').trim();
+        if (includeScreenshot && !screenshotPath && detail) {
+          setStatus(detail);
+        } else {
+          setStatus(includeScreenshot
+            ? 'Aktualni obrazovka je pripravena jako sdileny kontext pro dalsi zpravu.'
+            : 'Desktop context jsem nacetla pro dalsi zpravu.');
+        }
+      }
+      return result;
+    } catch {
+      if (!silent) {
+        setStatus(includeScreenshot ? 'Screenshot capture selhal.' : 'Desktop observation failed.');
+      }
+      return null;
+    } finally {
+      setEyesBusy(false);
+    }
+  }
+
+  async function updateObserveMode(nextEnabled, { silent = false } = {}) {
+    const api = window.lunaDesktop?.luna;
+    if (!api?.setObserveMode) {
+      if (!silent) {
+        setStatus('Observe mode works only inside the Electron desktop shell.');
+      }
+      return null;
+    }
+
+    try {
+      setEyesBusy(true);
+      const result = await api.setObserveMode(nextEnabled);
+      applyBackendChatState(result);
+      let initialObservation = null;
+      if (nextEnabled) {
+        initialObservation = await requestDesktopObservation(true, { silent: true });
+      }
+      if (!silent) {
+        const screenshotPath = String(initialObservation?.observation?.screenshot_path || '').trim();
+        if (nextEnabled && screenshotPath) {
+          setStatus('Observe mode je zapnuty a aktualni obrazovka je nactena.');
+        } else {
+          setStatus(String(result?.response || (nextEnabled ? 'Observe mode zapnuty.' : 'Observe mode vypnuty.')));
+        }
+      }
+      return result;
+    } catch {
+      if (!silent) {
+        setStatus('Observe mode change failed.');
+      }
+      return null;
+    } finally {
+      setEyesBusy(false);
+    }
+  }
+
   useEffect(() => () => {
     clearRevealTimer();
     revealActiveRef.current = false;
@@ -488,6 +883,27 @@ export default function App() {
       cancelled = true;
     };
   }, []);
+
+  useEffect(() => {
+    const api = window.lunaDesktop?.luna;
+    if (!api?.observeDesktop || page !== 'eyes' || !observeModeEnabled) return undefined;
+
+    let cancelled = false;
+
+    const refresh = async (includeScreenshot = false) => {
+      const result = await api.observeDesktop({ includeScreenshot }).catch(() => null);
+      if (cancelled || !result?.ok) return;
+      applyBackendChatState(result);
+    };
+
+    refresh(true);
+    const intervalId = window.setInterval(() => refresh(true), 5000);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(intervalId);
+    };
+  }, [page, observeModeEnabled]);
 
   useEffect(() => {
     if (!applicationsState.length) {
@@ -528,13 +944,34 @@ export default function App() {
     const decoratedText = attachment?.name ? `${baseText}
 
 [Attached file: ${attachment.name}]` : baseText;
+    const latestSharedFramePath = screenShare.active
+      ? (screenShare.framePath || await captureSharedDesktopFrame())
+      : '';
+    const filePaths = [
+      ...(attachment?.path ? [attachment.path] : []),
+      ...(latestSharedFramePath ? [latestSharedFramePath] : []),
+    ];
+    const extraContext = [
+      String(pendingDesktopContext?.context || '').trim(),
+      latestSharedFramePath
+        ? `Active desktop share: ${screenShare.label || 'desktop stream'}. Treat this as a live sampled desktop feed refreshed every few seconds. Use the latest refreshed frame as the current on-screen context. Do not describe it as a one-off attachment or say you lack live access while this share is active.`
+        : '',
+      screenShare.visionSummary
+        ? `Current live vision summary from the active desktop share:\n${screenShare.visionSummary}`
+        : '',
+    ].filter(Boolean).join('\n\n');
     const mediaType = inferGeneratedMediaType(baseText, pendingGenerationType);
 
     if (api?.sendMessage) {
       setChatBusy(true);
       setThinkingState(createThinkingState(baseText));
       try {
-        const result = await api.sendMessage({ chatId: activeChatId, text: decoratedText });
+        const result = await api.sendMessage({
+          chatId: activeChatId,
+          text: decoratedText,
+          filePaths,
+          extraContext,
+        });
         if (handleBackendResponseResult(result, 'Luna backend replied.')) {
           // handled above
         } else {
@@ -607,6 +1044,7 @@ export default function App() {
 
     setComposer('');
     setAttachment(null);
+    setPendingDesktopContext(null);
     setPendingGenerationType('');
     setPage('chat');
   }
@@ -945,16 +1383,33 @@ export default function App() {
 
   function handleInputAction(action, payload) {
     if (action === 'file' && payload) {
+      const isVisualAttachment = Boolean(
+        payload.type?.startsWith('image/')
+        || payload.type?.startsWith('video/'),
+      );
       const nextAttachment = {
         name: payload.name,
         type: payload.type || '',
+        path: payload.path || '',
         previewUrl: payload.type?.startsWith('image/') ? URL.createObjectURL(payload) : '',
       };
       setAttachment((current) => {
         if (current?.previewUrl?.startsWith('blob:')) URL.revokeObjectURL(current.previewUrl);
         return nextAttachment;
       });
-      setStatus(`Attached file: ${payload.name}`);
+      setStatus(
+        isVisualAttachment
+          ? `Prilozeno: ${payload.name}. Po odeslani to Luna a Xeno analyzuji pres vision model.`
+          : `Attached file: ${payload.name}`,
+      );
+      return;
+    }
+    if (action === 'screenshot') {
+      requestDesktopObservation(action === 'screenshot');
+      return;
+    }
+    if (action === 'share-screen') {
+      startScreenShare();
       return;
     }
     if (action === 'image') {
@@ -1117,6 +1572,8 @@ export default function App() {
             pendingAction={pendingAction}
             onConfirmPendingAction={() => handlePendingActionDecision('confirm')}
             onCancelPendingAction={() => handlePendingActionDecision('cancel')}
+            screenShare={screenShare}
+            onStopScreenShare={() => stopScreenShare({ message: 'Desktop sharing was stopped.' })}
           />
           <ChatInput
             value={composer}
@@ -1124,7 +1581,17 @@ export default function App() {
             onSend={handleSend}
             onAction={handleInputAction}
             attachment={attachment}
-            onClearAttachment={() => setAttachment(null)}
+            onClearAttachment={() => {
+              setAttachment((current) => {
+                if (current?.previewUrl?.startsWith('blob:')) URL.revokeObjectURL(current.previewUrl);
+                return null;
+              });
+              if (attachment?.source === 'desktop-capture') {
+                setPendingDesktopContext(null);
+              }
+            }}
+            screenShare={screenShare}
+            onStopScreenShare={() => stopScreenShare({ message: 'Desktop sharing was stopped.' })}
             centered={isEmptyChat}
           />
         </div>

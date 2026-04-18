@@ -3,8 +3,6 @@ from app.models.base_model import BaseModel
 
 class SimpleModel(BaseModel):
     def generate(self, prompt: str | list[dict[str, str]]) -> str:
-        print("DEBUG MODEL USED")
-
         if isinstance(prompt, list):
             last_user_messages = [msg["content"] for msg in prompt if msg["role"] == "user"]
             text = last_user_messages[-1].lower() if last_user_messages else ""
@@ -13,15 +11,16 @@ class SimpleModel(BaseModel):
             if "User:" in prompt:
                 text = prompt.split("User:")[-1].strip().lower()
 
-        print("DEBUG last_input:", text)
+        if any(greeting in text for greeting in ["ahoj", "cau", "cao", "dobry den", "hello", "hi"]):
+            return "Luna: Jsem tady. Co potrebujes?"
 
-        if "hello" in text or "hi" in text:
-            return "Luna: Hello, I am Luna. I am happy to help you with projects and ideas."
+        if any(phrase in text for phrase in ["jak se mas", "jak se mas?", "how are you"]):
+            return "Luna: Jsem pripravena pokracovat. Co je ted potreba?"
 
-        if "what can" in text:
-            return "Luna: Right now I can handle basic chat, keep conversation memory, and continue growing over time."
+        if any(phrase in text for phrase in ["what can", "co umis", "co dokaz", "co dovede"]):
+            return "Luna: Nejvic pomuzu s premyslenim nad projektem, dalsimi kroky a praktickym resenim problemu."
 
-        if "project" in text:
-            return "Luna: I can help you with project design, structure, and development."
+        if "project" in text or "projekt" in text:
+            return "Luna: Muzeme ho rozdelit na kroky, srovnat strukturu nebo vyresit dalsi tah."
 
-        return "Luna: I understand. I am still in an early version, but we can already communicate together."
+        return "Luna: Rozumim. Pojdme to vzit po poradku."

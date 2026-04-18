@@ -40,7 +40,7 @@ class DesktopObservation:
 
 class DesktopObserverTool:
     def __init__(self, capture_root: Path | None = None) -> None:
-        self.capture_root = capture_root or Path("data/observations")
+        self.capture_root = (capture_root or Path("data/observations")).resolve()
         self.capture_root.mkdir(parents=True, exist_ok=True)
         self._user32 = ctypes.windll.user32
         self._kernel32 = ctypes.windll.kernel32
@@ -129,7 +129,7 @@ class DesktopObserverTool:
 
     def capture_screenshot(self) -> tuple[str, str]:
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        target_path = self.capture_root / f"desktop_{timestamp}.png"
+        target_path = (self.capture_root / f"desktop_{timestamp}.png").resolve()
         try:
             if self._capture_with_mss(target_path) or self._capture_with_pil(target_path):
                 return str(target_path), "Screenshot captured successfully."
