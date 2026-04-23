@@ -124,3 +124,8 @@
 {"timestamp": "2026-04-15T10:52:19", "category": "observe", "title": "desktop screenshot", "status": "completed", "detail": "working in a desktop application"}
 {"timestamp": "2026-04-18T20:16:11", "category": "observe", "title": "desktop screenshot", "status": "completed", "detail": "working in a desktop application"}
 {"timestamp": "2026-04-18T20:23:09", "category": "observe", "title": "desktop screenshot", "status": "completed", "detail": "working in a desktop application"}
+{"timestamp": "2026-04-22T12:40:27", "category": "observe", "title": "desktop screenshot", "status": "completed", "detail": "working in a desktop application"}
+{"timestamp": "2026-04-23T21:50:54", "category": "app_launch", "title": "open vscode", "status": "pending", "detail": "Pending approval for open vscode."}
+{"timestamp": "2026-04-23T21:54:48", "category": "app_launch", "title": "open vscode", "status": "pending", "detail": "Pending approval for open vscode."}
+{"timestamp": "2026-04-23T21:55:00", "category": "app_launch", "title": "open vscode", "status": "completed", "detail": "Opened VS Code."}
+{"timestamp": "2026-04-23T21:55:00", "category": "app_launch", "title": "open vscode", "status": "completed", "detail": "Opened VS Code."}

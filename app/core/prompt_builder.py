@@ -33,9 +33,11 @@ class PromptBuilder:
         hidden_support: str = "",
         project_context: str = "",
         library_context: str = "",
+        session_context: str = "",
         intelligence_level: str = "4",
+        include_history: bool = True,
     ) -> list[dict[str, str]]:
-        history = self._history_for_prompt(intelligence_level)
+        history = self._history_for_prompt(intelligence_level) if include_history else []
         learning_memory = self.long_memory.summary()
 
         system_content = (
@@ -78,6 +80,11 @@ class PromptBuilder:
             system_content += (
                 "\nDigital library context: use these trusted local notes, files, and saved sources when they help answer the request.\n"
                 f"{library_context}"
+            )
+        if session_context:
+            system_content += (
+                "\nCurrent conversation context: use this to interpret short follow-ups, active intent, and recent local state.\n"
+                f"{session_context}"
             )
 
         messages: list[dict[str, str]] = [{"role": "system", "content": system_content}]
@@ -217,5 +224,6 @@ class PromptBuilder:
         return (
             "Response policy: Be concise, consistent, and grounded. "
             "Prefer 1 to 3 short paragraphs or a short flat list when needed. "
-            "Do not add unnecessary follow-up questions."
+            "Do not add unnecessary follow-up questions. "
+            "When summarizing project state or what is on screen, distinguish verified facts, visible observations, and uncertainty."
         )

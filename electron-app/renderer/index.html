@@ -1,0 +1,349 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>LunaAI Screen Share MVP</title>
+    <style>
+        :root {
+            color-scheme: dark;
+            --bg: #101010;
+            --panel: #161616;
+            --panel-2: #1e1e1e;
+            --line: rgba(255, 255, 255, 0.08);
+            --text: #f4f4f4;
+            --muted: rgba(255, 255, 255, 0.62);
+            --accent: #ff5c5c;
+            --accent-soft: rgba(255, 92, 92, 0.16);
+        }
+
+        * {
+            box-sizing: border-box;
+        }
+
+        body {
+            margin: 0;
+            min-height: 100vh;
+            font-family: "Segoe UI", system-ui, sans-serif;
+            background: radial-gradient(circle at top, #1a1a1a 0%, var(--bg) 55%);
+            color: var(--text);
+        }
+
+        .app-shell {
+            display: grid;
+            grid-template-columns: 360px 1fr;
+            gap: 20px;
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .panel {
+            background: linear-gradient(180deg, rgba(255, 255, 255, 0.025), rgba(255, 255, 255, 0.01));
+            border: 1px solid var(--line);
+            border-radius: 22px;
+            padding: 20px;
+            backdrop-filter: blur(14px);
+        }
+
+        h1, h2, h3, p {
+            margin: 0;
+        }
+
+        .sidebar {
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+        }
+
+        .title {
+            font-size: 28px;
+            font-weight: 700;
+        }
+
+        .subtitle {
+            color: var(--muted);
+            line-height: 1.5;
+        }
+
+        .controls {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+
+        button {
+            border: 1px solid var(--line);
+            border-radius: 999px;
+            background: var(--panel-2);
+            color: var(--text);
+            padding: 11px 16px;
+            font: inherit;
+            cursor: pointer;
+            transition: transform 120ms ease, border-color 120ms ease, background 120ms ease;
+        }
+
+        button:hover {
+            transform: translateY(-1px);
+            border-color: rgba(255, 255, 255, 0.18);
+        }
+
+        button.primary {
+            background: #f2f2f2;
+            color: #111;
+            border-color: transparent;
+        }
+
+        button.danger {
+            background: var(--accent-soft);
+            border-color: rgba(255, 92, 92, 0.35);
+            color: #ffd8d8;
+        }
+
+        .source-list {
+            display: grid;
+            gap: 12px;
+            max-height: 58vh;
+            overflow: auto;
+            padding-right: 4px;
+        }
+
+        .source-card {
+            display: grid;
+            gap: 10px;
+            padding: 12px;
+            background: rgba(255, 255, 255, 0.025);
+            border: 1px solid var(--line);
+            border-radius: 18px;
+            cursor: pointer;
+            transition: border-color 120ms ease, transform 120ms ease, background 120ms ease;
+        }
+
+        .source-card:hover {
+            transform: translateY(-1px);
+            border-color: rgba(255, 255, 255, 0.18);
+        }
+
+        .source-card.selected {
+            border-color: rgba(255, 92, 92, 0.62);
+            background: rgba(255, 92, 92, 0.08);
+        }
+
+        .source-thumbnail {
+            width: 100%;
+            aspect-ratio: 16 / 9;
+            border-radius: 14px;
+            object-fit: cover;
+            background: #0d0d0d;
+            border: 1px solid rgba(255, 255, 255, 0.05);
+        }
+
+        .source-meta {
+            display: flex;
+            justify-content: space-between;
+            gap: 12px;
+            align-items: center;
+        }
+
+        .source-name {
+            font-weight: 600;
+        }
+
+        .source-kind {
+            color: var(--muted);
+            font-size: 12px;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+        }
+
+        .content {
+            display: grid;
+            gap: 18px;
+            align-content: start;
+        }
+
+        .preview-wrap {
+            position: relative;
+            overflow: hidden;
+            border-radius: 24px;
+            border: 1px solid var(--line);
+            background: #0b0b0b;
+            min-height: 52vh;
+        }
+
+        video {
+            display: block;
+            width: 100%;
+            height: 100%;
+            max-height: 70vh;
+            object-fit: contain;
+            background: #080808;
+        }
+
+        .preview-empty {
+            min-height: 52vh;
+            display: grid;
+            place-items: center;
+            color: var(--muted);
+            text-align: center;
+            padding: 30px;
+        }
+
+        .status-strip {
+            display: grid;
+            grid-template-columns: repeat(4, minmax(0, 1fr));
+            gap: 12px;
+        }
+
+        .metric {
+            background: rgba(255, 255, 255, 0.025);
+            border: 1px solid var(--line);
+            border-radius: 18px;
+            padding: 14px;
+        }
+
+        .metric-label {
+            color: var(--muted);
+            font-size: 12px;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            margin-bottom: 8px;
+        }
+
+        .metric-value {
+            font-size: 18px;
+            font-weight: 600;
+            line-height: 1.35;
+        }
+
+        .result-grid {
+            display: grid;
+            grid-template-columns: 1.2fr 0.8fr;
+            gap: 18px;
+        }
+
+        .stack {
+            display: grid;
+            gap: 18px;
+        }
+
+        .result-box,
+        .request-panel {
+            background: rgba(255, 255, 255, 0.025);
+            border: 1px solid var(--line);
+            border-radius: 18px;
+            padding: 16px;
+            min-height: 160px;
+            white-space: pre-wrap;
+            line-height: 1.6;
+        }
+
+        .request-panel h3,
+        .debug-panel h3 {
+            margin-bottom: 10px;
+            font-size: 14px;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            color: var(--muted);
+        }
+
+        .debug-panel {
+            display: none;
+            background: rgba(255, 92, 92, 0.08);
+            border: 1px solid rgba(255, 92, 92, 0.26);
+            border-radius: 18px;
+            padding: 16px;
+        }
+
+        .debug-panel.is-open {
+            display: block;
+        }
+
+        .debug-log {
+            display: grid;
+            gap: 10px;
+            color: #f7d9d9;
+            font-size: 14px;
+            line-height: 1.5;
+        }
+    </style>
+</head>
+<body>
+    <div class="app-shell">
+        <aside class="panel sidebar">
+            <div>
+                <h1 class="title">LunaAI Screen Share MVP</h1>
+                <p class="subtitle">
+                    Live AI screen input for Luna, XenoAI, and Nvidia Vision. Frames are sampled every second,
+                    deduplicated, analyzed, planned, and routed into safe Electron actions.
+                </p>
+            </div>
+
+            <div class="controls">
+                <button id="refreshSources">Refresh sources</button>
+                <button id="startShare" class="primary">Start capture</button>
+                <button id="stopShare" class="danger">Stop</button>
+            </div>
+
+            <div id="sourceList" class="source-list"></div>
+        </aside>
+
+        <main class="panel content">
+            <div class="preview-wrap">
+                <video id="preview" autoplay playsinline muted></video>
+                <div id="previewEmpty" class="preview-empty">
+                    Select a monitor or window, then start capture.
+                </div>
+            </div>
+
+            <section class="status-strip">
+                <div class="metric">
+                    <div class="metric-label">Share state</div>
+                    <div id="shareState" class="metric-value">Idle</div>
+                </div>
+                <div class="metric">
+                    <div class="metric-label">Frame cadence</div>
+                    <div id="frameCadence" class="metric-value">1000 ms</div>
+                </div>
+                <div class="metric">
+                    <div class="metric-label">Last frame</div>
+                    <div id="lastFrameMeta" class="metric-value">No frame yet</div>
+                </div>
+                <div class="metric">
+                    <div class="metric-label">Pipeline status</div>
+                    <div id="pipelineStatus" class="metric-value">Waiting</div>
+                </div>
+            </section>
+
+            <section class="result-grid">
+                <div class="stack">
+                    <section>
+                        <h2 style="margin-bottom: 12px;">Vision result</h2>
+                        <div id="visionResult" class="result-box">No analysis yet.</div>
+                    </section>
+
+                    <section>
+                        <h2 style="margin-bottom: 12px;">Task planner</h2>
+                        <div id="plannerResult" class="result-box">Waiting for the first structured suggestion.</div>
+                    </section>
+                </div>
+
+                <div class="stack">
+                    <section class="request-panel">
+                        <h3>Confirmation request</h3>
+                        <div id="confirmationResult">No confirmation request.</div>
+                    </section>
+
+                    <section id="debugPanel" class="debug-panel">
+                        <h3>Electron debug panel</h3>
+                        <div id="debugLog" class="debug-log">
+                            <div>Debug panel is closed.</div>
+                        </div>
+                    </section>
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <script type="module" src="./renderer.js"></script>
+</body>
+</html>

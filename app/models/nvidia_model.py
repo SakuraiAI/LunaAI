@@ -8,7 +8,7 @@ except Exception:  # pragma: no cover - optional dependency
     OpenAI = None  # type: ignore[assignment]
 
 from app.models.base_model import BaseModel
-from app.core.text_utils import clean_model_response_text
+from app.core.text_utils import clean_model_response_text, sanitize_text_for_transport
 
 
 class NvidiaModel(BaseModel):
@@ -83,9 +83,15 @@ class NvidiaModel(BaseModel):
 
         messages: list[dict[str, str]]
         if isinstance(prompt, list):
-            messages = prompt
+            messages = [
+                {
+                    "role": str(item.get("role", "user") or "user"),
+                    "content": sanitize_text_for_transport(str(item.get("content", "") or "")),
+                }
+                for item in prompt
+            ]
         else:
-            messages = [{"role": "user", "content": prompt}]
+            messages = [{"role": "user", "content": sanitize_text_for_transport(prompt)}]
 
         request_kwargs: dict[str, Any] = {
             "model": self.model,

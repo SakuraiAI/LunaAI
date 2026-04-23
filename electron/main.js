@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain } from 'electron';
+import { app, BrowserWindow, desktopCapturer, ipcMain, session } from 'electron';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import os from 'node:os';
@@ -9,6 +9,7 @@ import { buildUpdateFeed, openUpdateDownload } from './services/updates.js';
 import { getApplicationsState, launchApplication, updateApplicationPath } from './services/applications.js';
 import { runLunaBridge } from './services/lunaBridge.js';
 import { createSystemMetricsReader } from './services/systemMetrics.js';
+import { registerActionIpc } from './ipc/actionIpc.js';
 
 
 const __filename = fileURLToPath(import.meta.url);
@@ -17,7 +18,36 @@ const isDev = !app.isPackaged;
 
 let mainWindow = null;
 let pendingLunaAction = null;
+let pendingScreenShareSourceId = '';
 const readSystemMetrics = createSystemMetricsReader();
+
+async function getScreenShareSources() {
+  return desktopCapturer.getSources({
+    types: ['screen', 'window'],
+    thumbnailSize: { width: 640, height: 360 },
+    fetchWindowIcons: true,
+  });
+}
+
+function mapScreenShareSource(source) {
+  return {
+    id: source.id,
+    name: source.name,
+    kind: source.id.startsWith('screen:') ? 'screen' : 'window',
+    thumbnailDataUrl: source.thumbnail && !source.thumbnail.isEmpty() ? source.thumbnail.toDataURL() : '',
+    appIconDataUrl: source.appIcon && !source.appIcon.isEmpty() ? source.appIcon.toDataURL() : '',
+  };
+}
+
+function pickScreenShareSource(sources) {
+  const list = Array.isArray(sources) ? sources : [];
+  const selected = list.find((source) => source.id === pendingScreenShareSourceId);
+  if (selected) return selected;
+  return list.find((source) => source.id.startsWith('screen:'))
+    || list.find((source) => !/lunaai/i.test(source.name))
+    || list[0]
+    || null;
+}
 
 
 function mergePendingLunaAction(result) {
@@ -85,6 +115,32 @@ function createWindow() {
 }
 
 app.whenReady().then(() => {
+  session.defaultSession.setDisplayMediaRequestHandler(
+    async (_request, callback) => {
+      try {
+        const sources = await getScreenShareSources();
+        const source = pickScreenShareSource(sources);
+        pendingScreenShareSourceId = '';
+
+        if (!source) {
+          callback({});
+          return;
+        }
+
+        callback({ video: source });
+      } catch {
+        pendingScreenShareSourceId = '';
+        callback({});
+      }
+    },
+    { useSystemPicker: false },
+  );
+
+  registerActionIpc({
+    ipcMain,
+    getMainWindow: () => mainWindow,
+  });
+
   createWindow();
 
   app.on('activate', () => {
@@ -201,6 +257,35 @@ ipcMain.handle('files:write-temp-data-url', async (_, payload) => {
   } catch (error) {
     return { ok: false, message: String(error) };
   }
+});
+
+ipcMain.handle('screen-share:list-sources', async () => {
+  try {
+    const sources = await getScreenShareSources();
+    return {
+      ok: true,
+      sources: sources
+        .filter((source) => !/lunaai/i.test(source.name))
+        .map(mapScreenShareSource),
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      message: String(error),
+      sources: [],
+    };
+  }
+});
+
+ipcMain.handle('screen-share:select-source', async (_, sourceId) => {
+  const nextSourceId = String(sourceId || '').trim();
+  if (!nextSourceId) {
+    pendingScreenShareSourceId = '';
+    return { ok: false, message: 'Missing screen share source id.' };
+  }
+
+  pendingScreenShareSourceId = nextSourceId;
+  return { ok: true };
 });
 
 ipcMain.handle('settings:get-runtime', () => {

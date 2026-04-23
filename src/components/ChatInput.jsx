@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { normalizeTransportText } from '../utils/textRepair';
 
 function MicIcon() {
   return (
@@ -31,7 +32,6 @@ export default function ChatInput({
   attachment,
   onClearAttachment,
   screenShare,
-  onStopScreenShare,
   centered = false,
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
@@ -72,8 +72,34 @@ export default function ChatInput({
     setMenuOpen(false);
   }
 
+  function handleTextChange(event) {
+    onChange(normalizeTransportText(event.target.value));
+  }
+
+  function handlePaste(event) {
+    const pastedText = event.clipboardData?.getData('text');
+    if (!pastedText) return;
+
+    const repairedText = normalizeTransportText(pastedText);
+    if (repairedText === pastedText) return;
+
+    event.preventDefault();
+    const target = event.currentTarget;
+    const selectionStart = target.selectionStart ?? value.length;
+    const selectionEnd = target.selectionEnd ?? selectionStart;
+    const nextValue = `${value.slice(0, selectionStart)}${repairedText}${value.slice(selectionEnd)}`;
+    onChange(nextValue);
+
+    window.requestAnimationFrame(() => {
+      const caret = selectionStart + repairedText.length;
+      target.selectionStart = caret;
+      target.selectionEnd = caret;
+    });
+  }
+
   function handleKeyDown(event) {
-    if (event.key === 'Enter' && !event.shiftKey) {
+    if (event.isComposing) return;
+    if (event.key === 'Enter' && !event.shiftKey && !event.ctrlKey && !event.altKey && !event.metaKey) {
       event.preventDefault();
       onSend();
     }
@@ -95,7 +121,6 @@ export default function ChatInput({
         {menuOpen && (
           <div className="chat-plus-menu">
             <button type="button" onClick={() => fileInputRef.current?.click()}>Add file</button>
-            <button type="button" onClick={() => { onAction('screenshot'); setMenuOpen(false); }}>Capture screen</button>
             <button type="button" onClick={() => { onAction('share-screen'); setMenuOpen(false); }}>
               {screenShare?.active ? 'Restart desktop share' : 'Share desktop'}
             </button>
@@ -106,18 +131,6 @@ export default function ChatInput({
       </div>
 
       <div className="chat-input-main">
-        {screenShare?.active && (
-          <div className={`attachment-chip screen-share-chip ${screenShare.previewUrl ? 'is-image' : ''}`}>
-            {screenShare.previewUrl && (
-              <img src={screenShare.previewUrl} alt="Desktop stream preview" className="attachment-preview" />
-            )}
-            <div className="screen-share-copy">
-              <span>{screenShare.label || 'Desktop share je aktivni'}</span>
-              <small>{screenShare.status || 'Luna a Xeno ctou prubezne obnovovane framy ze sdilene obrazovky.'}</small>
-            </div>
-            <button type="button" onClick={onStopScreenShare} aria-label="Stop desktop share">x</button>
-          </div>
-        )}
         {attachment && (
           <div className={`attachment-chip ${isImageAttachment ? 'is-image' : ''}`}>
             {isImageAttachment && <img src={attachment.previewUrl} alt={attachment.name} className="attachment-preview" />}
@@ -128,7 +141,8 @@ export default function ChatInput({
         <textarea
           ref={textareaRef}
           value={value}
-          onChange={(event) => onChange(event.target.value)}
+          onChange={handleTextChange}
+          onPaste={handlePaste}
           onKeyDown={handleKeyDown}
           placeholder="Message Luna..."
           rows={1}

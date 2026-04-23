@@ -27,6 +27,11 @@ export function runLunaBridge(payload) {
     const child = spawn(getPythonExecutable(), [getLunaBridgePath()], {
       cwd: process.cwd(),
       windowsHide: true,
+      env: {
+        ...process.env,
+        PYTHONUTF8: '1',
+        PYTHONIOENCODING: 'utf-8',
+      },
       stdio: ['pipe', 'pipe', 'pipe'],
     });
 
@@ -79,8 +84,7 @@ export function runLunaBridge(payload) {
     });
 
     try {
-      child.stdin.write(JSON.stringify(payload || {}));
-      child.stdin.end();
+      child.stdin.end(Buffer.from(JSON.stringify(payload || {}), 'utf8'));
     } catch (error) {
       clearTimeout(timeoutId);
       finish({ ok: false, message: String(error) });

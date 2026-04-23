@@ -194,14 +194,14 @@ class LunaEngine:
         command = user_input.strip().lower()
         if command == "/internet on":
             self.internet.set_enabled(True)
-            return "Luna: Internet jsem zapnula."
+            return "Luna: Internet jsem zapnula. 🌐"
         if command == "/internet off":
             self.internet.set_enabled(False)
             return "Luna: Internet jsem vypnula."
         if command == "/internet auto":
             self.internet.set_enabled(True)
             self.internet.set_mode("auto")
-            return "Luna: Internet necham na automatice."
+            return "Luna: Internet necham na automatice. 🙂"
         if command == "/internet manual":
             self.internet.set_mode("manual")
             return "Luna: Internet je ted jen rucne."
@@ -342,17 +342,33 @@ class LunaEngine:
         return self.model.generate(messages)
 
     def _generate_xeno_response(self, messages: list[dict[str, str]]) -> str:
+        inherited_system_context = [
+            str(item.get("content", "")).strip()
+            for item in messages
+            if str(item.get("role", "")).strip().lower() == "system" and str(item.get("content", "")).strip()
+        ]
         xeno_messages = [
             {
                 "role": "system",
                 "content": (
-                    "You are XenoAI, Luna's reasoning layer. "
-                    "Speak directly in Czech, be strategic, compact, clear, and grounded. "
-                    "Sound like an experienced technical partner, not a generic assistant. "
-                    "Do not greet unless the user greeted first. "
-                    "Do not expose internal reasoning or system notes."
-                ),
-            },
+                "You are XenoAI, Luna's reasoning layer. "
+                "Speak directly in Czech, be strategic, compact, clear, and grounded. "
+                "Sound like an experienced technical partner, not a generic assistant. "
+                "Do not greet unless the user greeted first. "
+                "Do not expose internal reasoning or system notes. "
+                "Never present guesses as verified facts. "
+                "If you summarize project status, distinguish verified local state, visible on-screen context, and uncertain inference. "
+                "Do not invent files, commands, successful runs, or project structure unless they are present in trusted context. "
+                "Use emoji occasionally and naturally, especially in short human replies. "
+                "For technical answers keep them restrained, usually zero or one. "
+                "Prefer calm emoji such as 🙂, ✨, 👀, or 🌙, and never overdo it. "
+                "Use the inherited hidden support, live screen context, attachment analysis, and current conversation context as trusted input."
+            ),
+        },
+            *[
+                {"role": "system", "content": content}
+                for content in inherited_system_context
+            ],
             *[item for item in messages if str(item.get("role", "")).strip().lower() != "system"],
         ]
         if self.support_model.is_available():
@@ -366,7 +382,7 @@ class LunaEngine:
             return self.model.generate(xeno_messages)
         except Exception as exc:
             self._last_support_model_source = "nvidia_error"
-            return f"Xeno: Ted se mi nepodarilo pripojit reasoning vrstvu. Details: {exc}"
+            return f"Xeno: Ted se mi nepodarilo pripojit reasoning vrstvu. Zkus to prosim za chvili znovu 🙂 Details: {exc}"
 
     def _is_local_model_failure(self, response: str) -> bool:
         lowered = str(response or "").strip().lower()
@@ -392,7 +408,7 @@ class LunaEngine:
                 return self.model.generate(messages)
             except Exception as exc:
                 self._last_primary_model_source = "nvidia_error"
-                return f"Luna: Ted se mi nepodarilo spojit s NVIDIA API. Details: {exc}"
+                return f"Luna: Ted se mi nepodarilo spojit s NVIDIA API. Zkus to prosim za chvili znovu 🌐 Details: {exc}"
 
         self._last_primary_model_source = "lm_studio"
         response = self.model.generate(messages)
@@ -692,7 +708,7 @@ class LunaEngine:
             observation = self.desktop_observer.observe(include_screenshot=False)
             self._remember_observation(observation, source="observe mode")
             self._log_action("observe", "observe mode", "enabled", str(observation.get("inferred_activity", "")))
-            return "Luna: Pozorovani obrazovky je zapnute. Budu s nim pocitat i pri dalsich odpovedich."
+            return "Luna: Pozorovani obrazovky je zapnute. Budu s nim pocitat i pri dalsich odpovedich. 👀"
         self._log_action("observe", "observe mode", "disabled", "Observe mode disabled.")
         return "Luna: Pozorovani obrazovky jsem vypnula."
 
@@ -825,7 +841,7 @@ class LunaEngine:
         message = repair_text(str(result.get("message", "")).strip())
         detail = repair_text(str(result.get("detail", "")).strip())
         if pending:
-            return "Luna: Akce je pripravena. Staci dat Accept, nebo ji zrusit pres Cancel."
+            return "Luna: Akce je připravená. Stačí dát Accept, nebo ji zrušit přes Cancel. 🙂"
         if status == "blocked":
             return f"Luna: Tuhle akci ted nemuzu spustit. {detail or message}".strip()
         if status == "failed":
@@ -1341,6 +1357,68 @@ class LunaEngine:
         lines.append("If the user asks a vague follow-up and no new project is explicitly introduced, assume they still mean this active project.")
         return "\n".join(lines)
 
+    def _context_snippet(self, text: object, limit: int = 140) -> str:
+        cleaned = repair_text(str(text or "")).strip()
+        cleaned = re.sub(r"\s+", " ", cleaned)
+        if len(cleaned) > limit:
+            cleaned = cleaned[: limit - 3].rstrip() + "..."
+        return cleaned
+
+    def _session_context(self) -> str:
+        history = self.memory.load_history()
+        lines: list[str] = []
+
+        chat_title = self.memory.get_current_session_title().strip()
+        if chat_title:
+            lines.append(f"Current chat title: {chat_title}")
+
+        current_voice = self._current_conversation_speaker()
+        if current_voice:
+            lines.append(f"Current active voice in this chat: {current_voice}")
+
+        last_user_message = ""
+        last_assistant_message = ""
+        for item in reversed(history):
+            role = str(item.get("role", "")).strip().lower()
+            content = self._context_snippet(item.get("content", ""), limit=180)
+            if not content:
+                continue
+            if role == "user" and not last_user_message:
+                last_user_message = content
+            elif role == "assistant" and not last_assistant_message:
+                last_assistant_message = content
+            if last_user_message and last_assistant_message:
+                break
+
+        if last_user_message:
+            lines.append(f"Most recent user topic: {last_user_message}")
+        if last_assistant_message:
+            lines.append(f"Most recent assistant direction: {last_assistant_message}")
+
+        if self.pending_action is not None:
+            pending_title = self._context_snippet(self.pending_action[0], limit=80)
+            if pending_title:
+                lines.append(f"Pending action waiting for confirmation: {pending_title}")
+
+        recent_actions = self.action_log.recent(2)
+        if recent_actions:
+            action_items: list[str] = []
+            for entry in reversed(recent_actions):
+                title = self._context_snippet(entry.title, limit=60)
+                if not title:
+                    continue
+                action_items.append(f"{title} [{entry.status}]")
+            if action_items:
+                lines.append("Recent local actions: " + " | ".join(action_items))
+
+        if self.observe_mode_enabled:
+            lines.append("Observe mode is enabled, so desktop context may still matter for follow-up questions.")
+
+        lines.append(
+            "If the user sends a short follow-up, assume they still mean the current topic in this chat unless they clearly switch topics."
+        )
+        return "\n".join(lines)
+
     def _library_context(self, user_input: str) -> str:
         workspace = self.user_settings.data
         if bool(workspace.cloud_enabled) and bool(workspace.cloud_auto_sync) and workspace.cloud_root_path.strip():
@@ -1383,7 +1461,9 @@ class LunaEngine:
         hidden_support: str = "",
         project_context: str = "",
         library_context: str = "",
+        session_context: str = "",
         intelligence_level: str | None = None,
+        include_history: bool = True,
     ) -> list[dict[str, str]]:
         level = str(intelligence_level or self._normalized_intelligence_level()).strip()
         return self.prompt_builder.build(
@@ -1396,7 +1476,9 @@ class LunaEngine:
             hidden_support=hidden_support,
             project_context=project_context,
             library_context=library_context,
+            session_context=session_context,
             intelligence_level=level,
+            include_history=include_history,
         )
 
     def build_messages(
@@ -1410,7 +1492,9 @@ class LunaEngine:
         hidden_support: str = "",
         project_context: str = "",
         library_context: str = "",
+        session_context: str = "",
         intelligence_level: str | None = None,
+        include_history: bool = True,
     ) -> list[dict[str, str]]:
         return self.build_prompt(
             user_input=user_input,
@@ -1422,8 +1506,31 @@ class LunaEngine:
             hidden_support=hidden_support,
             project_context=project_context,
             library_context=library_context,
+            session_context=session_context,
             intelligence_level=intelligence_level,
+            include_history=include_history,
         )
+
+    def _is_live_visual_query(self, user_input: str) -> bool:
+        normalized = " ".join(str(user_input or "").strip().lower().split())
+        if not normalized:
+            return False
+        triggers = (
+            "co vidis",
+            "co vidiš",
+            "co vidis ted",
+            "co vidiš ted",
+            "co je na obrazovce",
+            "co je ted na obrazovce",
+            "vidis moje prostredi",
+            "vidiš moje prostředí",
+            "what do you see",
+            "what do you see now",
+            "what is on the screen",
+            "what is on screen",
+            "describe the screen",
+        )
+        return any(trigger in normalized for trigger in triggers)
 
     def chat(self, user_input: str, *, extra_context: str = "") -> str:
         self._reload_runtime_preferences()
@@ -1432,11 +1539,11 @@ class LunaEngine:
             "xenoActive": False,
             "tracks": [],
         }
-        cleaned_input = user_input.strip()
+        cleaned_input = repair_text(str(user_input or "")).strip()
         if not cleaned_input:
             return ""
         if cleaned_input.lower() == "exit":
-            return "Luna: Dobre. Az budes chtit pokracovat, jsem tady."
+            return "Luna: Dobre. Az budes chtit pokracovat, jsem tady 🙂"
 
         pending_action_result = self._handle_pending_action_command(cleaned_input)
         if pending_action_result is not None:
@@ -1488,7 +1595,7 @@ class LunaEngine:
         coordination_prompt = self._format_coordination_prompt(coordination)
         if coordination_prompt:
             hidden_support = (f"{coordination_prompt}\n\n{hidden_support}".strip() if hidden_support else coordination_prompt)
-        extra_context = str(extra_context or "").strip()
+        extra_context = repair_text(str(extra_context or "")).strip()
         if extra_context:
             hidden_support = (f"{hidden_support}\n\n{extra_context}".strip() if hidden_support else extra_context)
         if self.observe_mode_enabled:
@@ -1497,6 +1604,16 @@ class LunaEngine:
                 hidden_support = (hidden_support + "\n\n" + observer_context).strip() if hidden_support else observer_context
         project_context = self._project_context()
         library_context = self._library_context(workflow_data["user_input"])
+        session_context = self._session_context()
+        live_share_active = "Active desktop share:" in extra_context
+        live_visual_query = live_share_active and self._is_live_visual_query(cleaned_input)
+        if live_visual_query:
+            live_share_instruction = (
+                "Live shared desktop rule: ignore older screen descriptions from this chat. "
+                "Use only the newest shared frame and the newest live vision summary for this answer. "
+                "If the newest frame is unclear, say it is unclear instead of reusing an older screen state."
+            )
+            session_context = f"{session_context}\n{live_share_instruction}".strip() if session_context else live_share_instruction
         intelligence_level = self._normalized_intelligence_level()
         messages = self.build_messages(
             user_input=workflow_data["user_input"],
@@ -1508,7 +1625,9 @@ class LunaEngine:
             hidden_support=hidden_support,
             project_context=project_context,
             library_context=library_context,
+            session_context=session_context,
             intelligence_level=intelligence_level,
+            include_history=not live_visual_query,
         )
 
         if response_author == "Xeno":
@@ -1516,7 +1635,7 @@ class LunaEngine:
         else:
             response = self._generate_primary_response(messages)
         if not str(response).strip():
-            response = "Luna: Tentokrat z modelu nic rozumneho neprislo. Zkus to prosim jeste jednou."
+            response = "Luna: Tentokrat z modelu nic rozumneho neprislo. Zkus to prosim jeste jednou 🙂"
         debug_footer = self._build_model_debug_footer(xeno_consulted=xeno_consulted)
         self.last_model_debug = debug_footer
         response = str(response).rstrip()

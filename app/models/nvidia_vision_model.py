@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any
 from urllib import error, request
 
-from app.core.text_utils import clean_model_response_text
+from app.core.text_utils import clean_model_response_text, sanitize_text_for_transport
 
 
 class NvidiaVisionModel:
@@ -87,7 +87,8 @@ class NvidiaVisionModel:
             raise RuntimeError("No media files were provided to the vision model.")
 
         has_video = False
-        content: list[dict[str, Any]] = [{"type": "text", "text": query.strip() or "Describe the scene."}]
+        safe_query = sanitize_text_for_transport(query).strip() or "Describe the scene."
+        content: list[dict[str, Any]] = [{"type": "text", "text": safe_query}]
 
         for media_file in paths:
             if not media_file.exists():
@@ -113,7 +114,12 @@ class NvidiaVisionModel:
             "messages": [
                 {
                     "role": "system",
-                    "content": "/no_think" if has_video else "/think",
+                    "content": (
+                        f"{'/no_think' if has_video else '/think'}\n"
+                        "Describe only what is visually present in the provided media. "
+                        "Do not invent hidden windows, prior screens, successful commands, filenames, or project structure unless clearly visible. "
+                        "If something is uncertain, say it is likely or unclear instead of stating it as fact."
+                    ),
                 },
                 {
                     "role": "user",

@@ -72,9 +72,9 @@
         }
       ],
       "memory_entries": [
+        "Luna direction: **Co vidím na aktuální obrazovce (nejnovější sdílený snímek):**\n\n**1. Editor kódu**\n- Otevřený soubor **Electron_bridge.py** v kódu editoru (pravděpodobně VS Co...",
+        "Chat focus: Máme hotovou první milestone a teď mapujeme další cesty. Co vidíš teď?",
         "Desktop observe: Desktop app -> working in a desktop application | LunaAI | visual context captured",
-        "Luna direction: Na základě přiloženého snímku vidím jen to, co je na obrazovce v okamžiku pořízení – otevřený editor VS Code s vybraným souborem, průzkumník projektových složek...",
-        "Chat focus: a vidis co se deje v real time Z",
         "Desktop observe: Desktop app -> working in a desktop application | LunaAI",
         "Desktop observe: VS Code -> editing source code or configuration files | ● engine.py - LunaAI - Visual Studio Code | visual context captured",
         "Desktop observe: Desktop app -> working in a desktop application | Překryvný prvek Výstřižků | visual context captured",

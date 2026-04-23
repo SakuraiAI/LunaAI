@@ -14,10 +14,35 @@ function fallbackFeed(items) {
   };
 }
 
-export default function UpdatesPage({ title, subtitle, items, currentVersion: runtimeVersion, onStatusChange }) {
-  const [feed, setFeed] = useState(() => fallbackFeed(items));
+export default function UpdatesPage({
+  title,
+  subtitle,
+  items,
+  currentVersion: runtimeVersion,
+  initialFeed = null,
+  onFeedChange,
+  onStatusChange,
+}) {
+  const [feed, setFeed] = useState(() => initialFeed || fallbackFeed(items));
   const [selectedId, setSelectedId] = useState(items[0]?.id || '');
   const [busy, setBusy] = useState(false);
+
+  function applyFeed(nextFeed) {
+    const normalized = {
+      ...fallbackFeed(items),
+      ...nextFeed,
+      entries: Array.isArray(nextFeed?.entries) && nextFeed.entries.length ? nextFeed.entries : items,
+      currentVersion: nextFeed?.currentVersion || runtimeVersion || '0.1.0',
+    };
+    setFeed(normalized);
+    onFeedChange?.(normalized);
+  }
+
+  useEffect(() => {
+    if (initialFeed) {
+      setFeed(initialFeed);
+    }
+  }, [initialFeed]);
 
   useEffect(() => {
     let active = true;
@@ -26,7 +51,7 @@ export default function UpdatesPage({ title, subtitle, items, currentVersion: ru
       const api = window.lunaDesktop?.updates;
       if (!api?.getFeed) {
         if (active) {
-          setFeed(fallbackFeed(items));
+          applyFeed(fallbackFeed(items));
         }
         return;
       }
@@ -34,15 +59,10 @@ export default function UpdatesPage({ title, subtitle, items, currentVersion: ru
       try {
         const nextFeed = await api.getFeed();
         if (!active) return;
-        setFeed({
-          ...fallbackFeed(items),
-          ...nextFeed,
-          entries: Array.isArray(nextFeed?.entries) && nextFeed.entries.length ? nextFeed.entries : items,
-          currentVersion: nextFeed?.currentVersion || runtimeVersion || '0.1.0',
-        });
+        applyFeed(nextFeed);
       } catch {
         if (active) {
-          setFeed(fallbackFeed(items));
+          applyFeed(fallbackFeed(items));
         }
       }
     }
@@ -68,26 +88,21 @@ export default function UpdatesPage({ title, subtitle, items, currentVersion: ru
   async function handleCheckUpdates() {
     const api = window.lunaDesktop?.updates;
     if (!api?.check) {
-      onStatusChange?.('Desktop updater check je pripraveny az v Electron okne.');
+      onStatusChange?.('Kontrola update\u016f je p\u0159ipraven\u00e1 a\u017e v Electron okn\u011b.');
       return;
     }
 
     setBusy(true);
     try {
       const nextFeed = await api.check();
-      setFeed({
-        ...fallbackFeed(items),
-        ...nextFeed,
-        entries: Array.isArray(nextFeed?.entries) && nextFeed.entries.length ? nextFeed.entries : items,
-        currentVersion: nextFeed?.currentVersion || runtimeVersion || '0.1.0',
-      });
+      applyFeed(nextFeed);
       onStatusChange?.(
         nextFeed?.updateAvailable
-          ? `Nova verze ${nextFeed.latestVersion} je pripravena.`
-          : 'LunaAI je uz na nejnovejsi verzi.'
+          ? `Nov\u00e1 verze ${nextFeed.latestVersion} je p\u0159ipraven\u00e1.`
+          : 'LunaAI u\u017e b\u011b\u017e\u00ed na nejnov\u011bj\u0161\u00ed verzi.'
       );
     } catch {
-      onStatusChange?.('Update check se nepodaril dokoncit.');
+      onStatusChange?.('Kontrolu update\u016f se nepoda\u0159ilo dokon\u010dit.');
     } finally {
       setBusy(false);
     }
@@ -96,16 +111,16 @@ export default function UpdatesPage({ title, subtitle, items, currentVersion: ru
   async function handleDownloadUpdate() {
     const api = window.lunaDesktop?.updates;
     if (!api?.download) {
-      onStatusChange?.('Download update funguje az v Electron desktop shellu.');
+      onStatusChange?.('Sta\u017een\u00ed update funguje a\u017e v Electron desktop shellu.');
       return;
     }
 
     setBusy(true);
     try {
       const result = await api.download(feed.downloadUrl || '');
-      onStatusChange?.(result?.message || 'Update download action finished.');
+      onStatusChange?.(result?.message || 'Sta\u017een\u00ed update bylo spu\u0161t\u011bn\u00e9.');
     } catch {
-      onStatusChange?.('Update download se nepodarilo otevrit.');
+      onStatusChange?.('Sta\u017een\u00ed update se nepoda\u0159ilo otev\u0159\u00edt.');
     } finally {
       setBusy(false);
     }
@@ -116,29 +131,29 @@ export default function UpdatesPage({ title, subtitle, items, currentVersion: ru
       <PanelCard title={title} subtitle={subtitle} className="updates-panel-card">
         <div className="updates-summary-card">
           <div className="updates-summary-copy">
-            <span className="updates-summary-label">Current version</span>
+            <span className="updates-summary-label">Aktu\u00e1ln\u00ed verze</span>
             <strong>{feed.currentVersion || runtimeVersion || '0.1.0'}</strong>
             <p>
               {feed.updateAvailable
-                ? `Nova verze ${feed.latestVersion} je pripravena ke stazeni.`
-                : 'LunaAI je aktualne synchronizovana s dostupnym release feedem.'}
+                ? `Nov\u00e1 verze ${feed.latestVersion} je p\u0159ipraven\u00e1 ke sta\u017een\u00ed.`
+                : 'LunaAI je te\u010f synchronizovan\u00e1 s dostupn\u00fdm release feedem.'}
             </p>
           </div>
           <div className="updates-summary-meta">
             <div>
-              <span>Latest</span>
+              <span>Nejnov\u011bj\u0161\u00ed</span>
               <strong>{feed.latestVersion || runtimeVersion || '0.1.0'}</strong>
-              <small>{feed.publishedAt || 'Release feed pending'}</small>
+              <small>{feed.publishedAt || '\u010cek\u00e1 se na release feed'}</small>
             </div>
             <div>
-              <span>Channel</span>
+              <span>Kan\u00e1l</span>
               <strong>{feed.channel || 'stable'}</strong>
-              <small>{feed.updateAvailable ? 'Update available' : 'Up to date'}</small>
+              <small>{feed.updateAvailable ? 'Update je k dispozici' : 'V\u0161echno je aktu\u00e1ln\u00ed'}</small>
             </div>
           </div>
           <div className="updates-summary-actions">
             <button type="button" className="secondary-button updates-action-button" onClick={handleCheckUpdates} disabled={busy}>
-              Check updates
+              Zkontrolovat update
             </button>
             <button
               type="button"
@@ -146,7 +161,7 @@ export default function UpdatesPage({ title, subtitle, items, currentVersion: ru
               onClick={handleDownloadUpdate}
               disabled={busy || !feed.updateAvailable}
             >
-              Download update
+              St\u00e1hnout update
             </button>
           </div>
         </div>
@@ -172,7 +187,7 @@ export default function UpdatesPage({ title, subtitle, items, currentVersion: ru
 
       <PanelCard
         title={selected?.title || 'Update'}
-        subtitle={selected ? `${selected.version} ? ${selected.date}` : 'LunaAI system update detail'}
+        subtitle={selected ? `${selected.version} \u00b7 ${selected.date}` : 'Detail syst\u00e9mov\u00e9ho update LunaAI'}
         className="updates-panel-card"
       >
         {selected ? (
@@ -183,7 +198,7 @@ export default function UpdatesPage({ title, subtitle, items, currentVersion: ru
             </div>
             <p className="update-detail-copy">{selected.detail}</p>
             <div className="update-notes-block">
-              <span>What changed</span>
+              <span>Co se zm\u011bnilo</span>
               <div className="update-notes-list">
                 {selected.notes?.map((note, index) => (
                   <div key={`${selected.id}-note-${index}`} className="update-note-item">

@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react';
 import PanelCard from '../sections/PanelCard';
 
 function ResourceSlider({ label, value, onChange, meta, accentLabel }) {
@@ -27,7 +28,110 @@ function ResourceSlider({ label, value, onChange, meta, accentLabel }) {
   );
 }
 
-export default function SettingsPage({ settings, onChange, onSave, appMeta }) {
+function ApplicationsSettingsSection({
+  items,
+  selectedAppId,
+  onSelectApp,
+  onOpenApp,
+  onSavePath,
+}) {
+  const selected = items.find((item) => item.id === selectedAppId) || items[0] || null;
+  const [pathDraft, setPathDraft] = useState('');
+
+  useEffect(() => {
+    setPathDraft(selected?.path || '');
+  }, [selected?.id, selected?.path]);
+
+  return (
+    <div className="settings-applications-section applications-page-grid">
+      <PanelCard
+        title="Applications"
+        subtitle="Tady spravujes napojene desktop aplikace, jejich cesty a to, co muze Luna primo otevirat."
+        className="applications-panel-card"
+      >
+        <div className="applications-list">
+          {items.length ? items.map((item) => (
+            <button
+              key={item.id}
+              type="button"
+              className={`application-card ${selected?.id === item.id ? 'is-active' : ''}`}
+              onClick={() => onSelectApp(item.id)}
+            >
+              <div className="application-card-copy">
+                <strong>{item.title}</strong>
+                <p>{item.detail}</p>
+              </div>
+              <span className={`application-status ${item.connected ? 'is-connected' : 'is-missing'}`}>
+                {item.status}
+              </span>
+            </button>
+          )) : (
+            <div className="applications-empty">
+              <strong>Zatim tu nejsou zadne napojene aplikace</strong>
+              <p>Jakmile Luna nacte desktop appky z backend settings, objevi se tady.</p>
+            </div>
+          )}
+        </div>
+      </PanelCard>
+
+      <PanelCard
+        title={selected?.title || 'Application Detail'}
+        subtitle={selected?.connected ? 'Tahleta aplikace je pripravena pro Luna desktop akce.' : 'Tady muzes doplnit nebo upravit cestu k aplikaci.'}
+        className="applications-panel-card"
+      >
+        {selected ? (
+          <div className="application-detail-surface">
+            <div className="application-detail-block">
+              <span>Stav</span>
+              <strong>{selected.status}</strong>
+              <small>{selected.connected ? 'Luna ji umi otevrit primo z desktop shellu.' : 'Po ulozeni platne cesty se prepne do connected stavu.'}</small>
+            </div>
+            <div className="application-detail-block">
+              <span>Cesta</span>
+              <input
+                className="application-path-input"
+                type="text"
+                value={pathDraft}
+                onChange={(event) => setPathDraft(event.target.value)}
+                placeholder="Zadej cestu k .exe souboru"
+              />
+              <small>Napojeni se uklada do backend settings, aby UI i system pouzivaly stejny zdroj pravdy.</small>
+            </div>
+            <div className="application-detail-actions">
+              <button
+                type="button"
+                className="secondary-button application-save-button"
+                onClick={() => onSavePath(selected, pathDraft)}
+              >
+                Save path
+              </button>
+              <button
+                type="button"
+                className="primary-button application-open-button"
+                onClick={() => onOpenApp(selected)}
+                disabled={!selected.connected}
+              >
+                {selected.ctaLabel || 'Open'}
+              </button>
+            </div>
+          </div>
+        ) : null}
+      </PanelCard>
+    </div>
+  );
+}
+
+export default function SettingsPage({
+  settings,
+  onChange,
+  onSave,
+  appMeta,
+  applications,
+  selectedAppId,
+  onSelectApp,
+  onOpenApp,
+  onSavePath,
+}) {
   const memoryTotal = Number(appMeta.memoryGb || 0);
   const memoryBudget = memoryTotal ? Math.max(0.5, (memoryTotal * settings.memoryLimit) / 100).toFixed(1) : '--';
 
@@ -119,6 +223,14 @@ export default function SettingsPage({ settings, onChange, onSave, appMeta }) {
           </div>
         </div>
       </PanelCard>
+
+      <ApplicationsSettingsSection
+        items={applications}
+        selectedAppId={selectedAppId}
+        onSelectApp={onSelectApp}
+        onOpenApp={onOpenApp}
+        onSavePath={onSavePath}
+      />
     </div>
   );
 }

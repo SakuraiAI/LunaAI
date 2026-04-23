@@ -12,8 +12,8 @@ if str(ROOT) not in sys.path:
 from app.core.engine import LunaEngine
 
 
-class _StdoutWithReconfigure(Protocol):
-    def reconfigure(self, *, encoding: str) -> object: ...
+class _TextIoWithReconfigure(Protocol):
+    def reconfigure(self, *, encoding: str, errors: str | None = None) -> object: ...
 
 
 class _BridgeEngine(Protocol):
@@ -100,8 +100,9 @@ def _state(engine: _BridgeEngine) -> dict[str, Any]:
 
 def main() -> int:
     try:
-        if hasattr(sys.stdout, "reconfigure"):
-            cast(_StdoutWithReconfigure, sys.stdout).reconfigure(encoding="utf-8")
+        for stream in (sys.stdin, sys.stdout, sys.stderr):
+            if hasattr(stream, "reconfigure"):
+                cast(_TextIoWithReconfigure, stream).reconfigure(encoding="utf-8", errors="replace")
     except Exception:
         pass
     raw = sys.stdin.read().strip()

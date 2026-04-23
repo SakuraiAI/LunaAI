@@ -12,15 +12,15 @@ class SimpleModel(BaseModel):
                 text = prompt.split("User:")[-1].strip().lower()
 
         if any(greeting in text for greeting in ["ahoj", "cau", "cao", "dobry den", "hello", "hi"]):
-            return "Luna: Jsem tady. Co potrebujes?"
+            return "Luna: Jsem tady 🙂 Co potrebujes?"
 
         if any(phrase in text for phrase in ["jak se mas", "jak se mas?", "how are you"]):
-            return "Luna: Jsem pripravena pokracovat. Co je ted potreba?"
+            return "Luna: Jsem připravená pokračovat 🙂 Co je teď potřeba?"
 
         if any(phrase in text for phrase in ["what can", "co umis", "co dokaz", "co dovede"]):
-            return "Luna: Nejvic pomuzu s premyslenim nad projektem, dalsimi kroky a praktickym resenim problemu."
+            return "Luna: Nejvic pomuzu s premyslenim nad projektem, dalsimi kroky a praktickym resenim problemu ✨"
 
         if "project" in text or "projekt" in text:
-            return "Luna: Muzeme ho rozdelit na kroky, srovnat strukturu nebo vyresit dalsi tah."
+            return "Luna: Muzeme ho rozdelit na kroky, srovnat strukturu nebo vyresit dalsi tah 🚀"
 
-        return "Luna: Rozumim. Pojdme to vzit po poradku."
+        return "Luna: Rozumim. Pojdme to vzit po poradku. 🙂"

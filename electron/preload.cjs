@@ -13,6 +13,10 @@ contextBridge.exposeInMainWorld('lunaDesktop', {
     readAsDataUrl: (filePath) => ipcRenderer.invoke('files:read-as-data-url', filePath),
     writeTempDataUrl: (payload) => ipcRenderer.invoke('files:write-temp-data-url', payload),
   },
+  screenShare: {
+    listSources: () => ipcRenderer.invoke('screen-share:list-sources'),
+    selectSource: (sourceId) => ipcRenderer.invoke('screen-share:select-source', sourceId),
+  },
   settings: {
     getRuntime: () => ipcRenderer.invoke('settings:get-runtime'),
     saveRuntime: (payload) => ipcRenderer.invoke('settings:save-runtime', payload),
@@ -26,6 +30,19 @@ contextBridge.exposeInMainWorld('lunaDesktop', {
     getFeed: () => ipcRenderer.invoke('updates:get-feed'),
     check: () => ipcRenderer.invoke('updates:check'),
     download: (downloadUrl) => ipcRenderer.invoke('updates:download', downloadUrl),
+  },
+  actionEngine: {
+    execute: (payload) => ipcRenderer.invoke('action-engine:execute', payload),
+    onInternalAction: (handler) => {
+      if (typeof handler !== 'function') {
+        return () => {};
+      }
+      const listener = (_event, payload) => handler(payload);
+      ipcRenderer.on('action-engine:internal-ui', listener);
+      return () => {
+        ipcRenderer.removeListener('action-engine:internal-ui', listener);
+      };
+    },
   },
   luna: {
     getState: () => ipcRenderer.invoke('luna:get-state'),
