@@ -1,5 +1,6 @@
 from typing import Callable
 
+from app.core.text_utils import ascii_fold_text
 from app.xeno.models import AgentRun, AgentStep, ProjectBlueprint
 
 
@@ -153,7 +154,7 @@ class TaskAgent:
         return self.create_handoff_summary_from_steps(run.steps)
 
     def can_handle(self, user_input: str) -> bool:
-        normalized = user_input.strip().lower()
+        normalized = ascii_fold_text(user_input.strip().lower())
         signals = [
             "open chrome",
             "open browser",
@@ -175,16 +176,44 @@ class TaskAgent:
             "vytvor soubor",
             "vytvo? soubor",
             "vytvor slozku",
+            "vytvor slozky",
             "udelej slozku",
+            "udelej slozky",
             "vytvo? slo?ku",
+            "vytvo? slo?ky",
             "create file",
             "create folder",
             "make folder",
+            "kalkulacku",
+            "kalkula?ku",
+            "calculator",
+            "scripts",
+            "script",
+            "srcipts",
+            "scriots",
+            "skripty",
+            "web",
+            "website",
+            "stranku",
+            "landing page",
+            "portfolio",
+            "email",
+            "e-mail",
+            "mail",
+            "posli email",
+            "odesli email",
+            "napis email",
             "python projekt",
             "web projekt",
             "electron projekt",
             "rewrite file",
             "append to file",
+            "spust",
+            "spustit projekt",
+            "spust projekt",
+            "spust workspace",
+            "run project",
+            "run workspace",
             "open workspace",
             "otevri workspace",
             "otev?i workspace",
@@ -208,7 +237,7 @@ class TaskAgent:
         )
 
     def create_action_support(self, user_input: str, intelligence_level: str = "4") -> str:
-        normalized = user_input.strip().lower()
+        normalized = ascii_fold_text(user_input.strip().lower())
         level = str(intelligence_level).strip()
 
         if any(signal in normalized for signal in ["chrome", "browser", "prohlizec"]):
@@ -229,7 +258,7 @@ class TaskAgent:
                 base += " Keep the chain short and evidence-aware."
             return base
 
-        if any(signal in normalized for signal in ["soubor", "file", "projekt", "project", "workspace", "vscode", "folder", "slozku", "slo?ku"]):
+        if any(signal in normalized for signal in ["soubor", "file", "projekt", "project", "workspace", "vscode", "folder", "slozku", "slozky", "slo?ku", "slo?ky", "kalkulacku", "kalkula?ku", "calculator", "scripts", "script", "srcipts", "scriots", "skripty", "web", "website", "stranku", "landing", "portfolio", "email", "e-mail", "mail", "spust", "run project"]):
             base = (
                 "Hidden task agent support: local build or file-system action requested. "
                 "Prefer verified execution, track the next step, and keep the response tied to what truly happened on disk."

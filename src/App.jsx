@@ -100,6 +100,10 @@ function buildFallbackUpdateFeed(items, runtimeVersion = '0.1.0') {
     channel: 'stable',
     updateAvailable: false,
     downloadUrl: '',
+    downloadStatus: 'none',
+    readyToInstall: false,
+    downloadedPath: '',
+    autoDownloadSupported: false,
     entries: items,
   };
 }
@@ -395,15 +399,18 @@ export default function App() {
   const profileName = signedInAs ? signedInAs.split('@')[0] : 'Sakurai Haise';
   const notifications = useMemo(() => {
     const items = [...baseNotifications];
-    if (updateFeed?.updateAvailable && updateFeed.latestVersion && updateFeed.latestVersion !== seenUpdateVersion) {
+    const updateReady = Boolean(updateFeed?.readyToInstall);
+    if (updateFeed?.updateAvailable && updateFeed.latestVersion && (updateReady || updateFeed.latestVersion !== seenUpdateVersion)) {
       items.unshift({
         id: `update-${updateFeed.latestVersion}`,
         kind: 'update',
         label: 'Update',
-        title: `Nov\u00fd update ${updateFeed.latestVersion}`,
-        detail: updateFeed.publishedAt
-          ? `Je p\u0159ipraven\u00e1 nov\u00e1 verze LunaAI. Vydan\u00e1 ${updateFeed.publishedAt}.`
-          : 'Je p\u0159ipraven\u00e1 nov\u00e1 verze LunaAI.',
+        title: updateReady ? `Nov\u00e1 verze ${updateFeed.latestVersion} je p\u0159ipraven\u00e1` : `Nov\u00fd update ${updateFeed.latestVersion}`,
+        detail: updateReady
+          ? 'Update je sta\u017een\u00fd. Kliknut\u00edm otev\u0159e\u0161 Restart & Update.'
+          : updateFeed.downloadStatus === 'missing-url'
+            ? 'Update je dostupn\u00fd, ale release manifest zat\u00edm nem\u00e1 downloadUrl.'
+            : 'LunaAI p\u0159ipravuje update na pozad\u00ed.',
         version: updateFeed.latestVersion,
       });
     }
@@ -553,16 +560,22 @@ export default function App() {
 
   useEffect(() => {
     const latestVersion = String(updateFeed?.latestVersion || '');
-    if (!updateFeed?.updateAvailable || !latestVersion || latestVersion === seenUpdateVersion) {
+    const updateReady = Boolean(updateFeed?.readyToInstall);
+    if (!updateFeed?.updateAvailable || !latestVersion || (!updateReady && latestVersion === seenUpdateVersion)) {
       return;
     }
-    if (announcedUpdateVersionRef.current === latestVersion) {
+    const announceKey = `${latestVersion}:${updateReady ? 'ready' : 'available'}`;
+    if (announcedUpdateVersionRef.current === announceKey) {
       return;
     }
 
-    announcedUpdateVersionRef.current = latestVersion;
-    setStatus(`Je tu nov\u00fd update ${latestVersion}. Najde\u0161 ho i na zvonku naho\u0159e.`);
-  }, [seenUpdateVersion, updateFeed?.latestVersion, updateFeed?.updateAvailable]);
+    announcedUpdateVersionRef.current = announceKey;
+    setStatus(
+      updateReady
+        ? `Nov\u00e1 verze ${latestVersion} je p\u0159ipraven\u00e1. M\u016f\u017ee\u0161 d\u00e1t Restart & Update.`
+        : `Je tu nov\u00fd update ${latestVersion}. LunaAI ho p\u0159ipravuje na pozad\u00ed.`
+    );
+  }, [seenUpdateVersion, updateFeed?.latestVersion, updateFeed?.readyToInstall, updateFeed?.updateAvailable]);
 
   useEffect(() => {
     if (currentChatId) {
@@ -722,7 +735,7 @@ export default function App() {
       ...current,
       debugPanelOpen: false,
       lastActionStatus: current.lastActionStatus === 'idle' ? 'idle' : 'closed',
-      lastActionMessage: 'Interni debug panel byl zavreny.',
+      lastActionMessage: 'Interní debug panel byl zavřený.',
     }));
   }
 
@@ -925,7 +938,7 @@ export default function App() {
 
   async function startScreenShare() {
     if (!navigator.mediaDevices?.getDisplayMedia) {
-      const message = 'Sdileni obrazovky v tomhle prostredi neni dostupne.';
+      const message = 'Sdílení obrazovky v tomhle prostředí není dostupné.';
       setStatus(message);
       setScreenSharePicker((current) => ({ ...current, loading: false, selectingId: '', error: message }));
       return false;
@@ -943,7 +956,7 @@ export default function App() {
 
       const track = stream.getVideoTracks()[0];
       if (!track) {
-        const message = 'Sdileni obrazovky nevratilo video stopu.';
+        const message = 'Sdílení obrazovky nevrátilo video stopu.';
         stopScreenShare({ message });
         setScreenSharePicker((current) => ({
           ...current,
@@ -955,7 +968,7 @@ export default function App() {
       }
 
       track.addEventListener('ended', () => {
-        stopScreenShare({ message: 'Sdileni obrazovky bylo ukonceno.' });
+        stopScreenShare({ message: 'Sdílení obrazovky bylo ukončeno.' });
       });
 
       const { video } = ensureScreenShareNodes();
@@ -978,7 +991,7 @@ export default function App() {
         stream,
         previewUrl: '',
         framePath: '',
-        status: 'Desktop share bezi. Pripravuju prvni frame a vision shrnuti.',
+        status: 'Desktop share běží. Připravuju první frame a vision shrnutí.',
         visionSummary: '',
         summaryStatus: 'working',
         summaryStatusLabel: 'Starting',
@@ -1005,8 +1018,8 @@ export default function App() {
       return true;
     } catch (error) {
       const message = String(error?.message || '').trim()
-        ? `Sdileni obrazovky se nespustilo: ${String(error.message).trim()}`
-        : 'Sdileni obrazovky se nespustilo.';
+        ? `Sdílení obrazovky se nespustilo: ${String(error.message).trim()}`
+        : 'Sdílení obrazovky se nespustilo.';
       stopScreenShare({ message });
       setScreenSharePicker((current) => ({ ...current, loading: false, selectingId: '', error: message }));
       return false;
@@ -1083,7 +1096,7 @@ export default function App() {
       return;
     }
 
-    setStatus(`Pripravuju sdileni: ${sourceName || 'vybrany zdroj'}.`);
+    setStatus(`Připravuju sdílení: ${sourceName || 'vybraný zdroj'}.`);
     setScreenSharePicker((current) => ({
       ...current,
       loading: true,
@@ -1110,7 +1123,7 @@ export default function App() {
         closeScreenSharePicker();
       }
     } catch (error) {
-      const message = String(error?.message || 'Sdileni obrazovky se nepodarilo spustit.');
+      const message = String(error?.message || 'Sdílení obrazovky se nepodařilo spustit.');
       setScreenSharePicker((current) => ({
         ...current,
         loading: false,
@@ -1231,7 +1244,7 @@ export default function App() {
       }
 
       try {
-        const nextFeed = await api.getFeed();
+        const nextFeed = api.prepare ? await api.prepare() : await api.getFeed();
         setUpdateFeed({
           ...buildFallbackUpdateFeed(updates, appMeta.version),
           ...nextFeed,
@@ -1320,19 +1333,19 @@ export default function App() {
             debugPanelOpen: true,
             confirmationRequest: null,
             lastActionStatus: 'executed',
-            lastActionMessage: 'Interni debug panel je otevreny.',
+            lastActionMessage: 'Interní debug panel je otevřený.',
           }));
-          setStatus('Oteviram interni debug panel pro share workflow.');
+          setStatus('Otevírám interní debug panel pro share workflow.');
           break;
         case 'close-share-debug-panel':
           closeShareDebugPanel();
-          setStatus('Interni debug panel je zavreny.');
+          setStatus('Interní debug panel je zavřený.');
           break;
         case 'start-share-desktop':
           refreshScreenShareSources();
           break;
         case 'stop-share-desktop':
-          stopScreenShare({ message: 'Desktop share byla zastavena interni akci.' });
+          stopScreenShare({ message: 'Desktop share byla zastavena interní akcí.' });
           break;
         case 'chat':
         case 'projects':
@@ -1341,7 +1354,7 @@ export default function App() {
         case 'friends':
         case 'settings':
           setPage(action.target);
-          setStatus(`Prepinam interni panel na ${action.target}.`);
+          setStatus(`Přepínám interní panel na ${action.target}.`);
           break;
         default:
           break;

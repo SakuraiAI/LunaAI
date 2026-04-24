@@ -72,6 +72,107 @@ class XenoCoordinator:
             parts.append("Task-agent execution track active")
         return " | ".join(parts)
 
+    def _action_intent(self, category: str, title: str) -> str:
+        normalized = f"{category} {title}".strip().lower()
+        if "run project" in normalized or category == "project_run":
+            return "run_project"
+        if "calculator" in normalized or "kalkulack" in normalized:
+            return "create_calculator"
+        if "script" in normalized or "skript" in normalized:
+            return "create_scripts"
+        if "email" in normalized or "mail" in normalized:
+            return "draft_email"
+        if "web" in normalized or "website" in normalized or "landing" in normalized:
+            return "create_web_page"
+        if "create folders" in normalized:
+            return "create_folders"
+        if "create file" in normalized or "overwrite file" in normalized or "append to file" in normalized:
+            return "edit_files"
+        if "workspace" in normalized and "vscode" in normalized:
+            return "open_workspace_in_vscode"
+        if category == "app_launch":
+            return "open_app"
+        if category == "path_open":
+            return "open_path"
+        if title.startswith("chain action:"):
+            return "multi_step_action"
+        return category or "local_action"
+
+    def plan_action(
+        self,
+        *,
+        category: str,
+        title: str,
+        user_input: str = "",
+        project_context: str = "",
+        desktop_context: str = "",
+    ) -> dict[str, object]:
+        """Deterministic Xeno action check before Luna prepares or executes local actions."""
+        normalized = f"{category} {title} {user_input}".strip().lower()
+        blocked_markers = [
+            "delete ",
+            "remove ",
+            "rm ",
+            "rmdir",
+            "format ",
+            "registry",
+            "regedit",
+            "smaz",
+            "vymaz",
+        ]
+        if any(marker in normalized for marker in blocked_markers):
+            return {
+                "status": "blocked",
+                "intent": self._action_intent(category, title),
+                "risk": "high",
+                "requiresConfirmation": True,
+                "recommendedAction": "block",
+                "reason": "Xeno zastavil akci, protoze vypada jako mazani nebo rizikovy systemovy zasah.",
+                "category": category,
+            }
+
+        risk_by_category = {
+            "observe": "low",
+            "path_open": "low",
+            "app_launch": "medium",
+            "project_run": "medium",
+            "file_change": "medium",
+            "communication": "medium",
+            "system": "medium",
+        }
+        intent = self._action_intent(category, title)
+        risk = risk_by_category.get(category, "medium")
+        requires_confirmation = category in {"app_launch", "path_open", "project_run", "file_change", "communication", "system"}
+
+        reason_map = {
+            "run_project": "Xeno ověřil záměr: projekt se má spustit z aktivního workspace a má zůstat za potvrzením.",
+            "create_calculator": "Xeno ověřil záměr: jde o tvorbu kódu na disku, takže Luna má připravit změnu a čekat na Accept.",
+            "create_scripts": "Xeno ověřil záměr: jde o vytvoření projektových skriptů na disku, takže Luna má připravit změnu a čekat na Accept.",
+            "create_web_page": "Xeno ověřil záměr: jde o vytvoření webových souborů v projektu a následné vysvětlení výsledku.",
+            "draft_email": "Xeno ověřil záměr: u emailu smí Luna připravit pouze koncept, automatické odeslání zůstává zakázané.",
+            "create_folders": "Xeno ověřil záměr: jde o bezpečnou přípravu struktury složek v projektu.",
+            "edit_files": "Xeno ověřil záměr: bude se měnit soubor, proto je správné držet akci za potvrzením.",
+            "open_workspace_in_vscode": "Xeno ověřil záměr: otevřít aktuální workspace ve VS Code je vratná lokální akce.",
+            "open_app": "Xeno ověřil záměr: otevření aplikace je lokální akce a má jít přes potvrzení.",
+            "open_path": "Xeno ověřil záměr: otevření cesty je lokální akce bez úprav souborů.",
+            "multi_step_action": "Xeno ověřil záměr: vícekrokovou akci držet jako jeden plán a provést až po potvrzení.",
+        }
+        reason = reason_map.get(intent, "Xeno ověřil záměr a nenašel blokující riziko.")
+        if project_context:
+            reason += " Projektový kontext je k dispozici."
+        if desktop_context:
+            reason += " Obrazovkový kontext je k dispozici."
+
+        return {
+            "status": "approved",
+            "intent": intent,
+            "risk": risk,
+            "requiresConfirmation": requires_confirmation,
+            "recommendedAction": title,
+            "reason": reason,
+            "category": category,
+        }
+
     def build_model_support(
         self,
         user_input: str,

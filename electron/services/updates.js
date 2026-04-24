@@ -1,7 +1,10 @@
 import { app, shell } from 'electron';
 import path from 'node:path';
 import fs from 'node:fs';
+import fsp from 'node:fs/promises';
+import { fileURLToPath } from 'node:url';
 
+let downloadTask = null;
 
 function getUpdateManifestCandidates() {
   const appPath = app.getAppPath();
@@ -57,13 +60,126 @@ function readUpdateManifest() {
   }
 }
 
+function getUpdateCacheDir() {
+  return path.join(app.getPath('userData'), 'updates');
+}
+
+function sanitizeFileName(value) {
+  return String(value || 'update')
+    .replace(/[<>:"/\\|?*\x00-\x1f]/g, '-')
+    .replace(/\s+/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^-|-$/g, '')
+    || 'update';
+}
+
+function getPackageFileName(downloadUrl, latestVersion) {
+  try {
+    const parsed = new URL(downloadUrl);
+    const baseName = path.basename(parsed.pathname || '');
+    if (baseName && path.extname(baseName)) {
+      return sanitizeFileName(baseName);
+    }
+  } catch {
+    const baseName = path.basename(String(downloadUrl || ''));
+    if (baseName && path.extname(baseName)) {
+      return sanitizeFileName(baseName);
+    }
+  }
+
+  return `LunaAI-${sanitizeFileName(latestVersion)}.update`;
+}
+
+function getPreparedPackagePath(feed) {
+  if (!feed?.downloadUrl || !feed?.latestVersion) {
+    return '';
+  }
+  return path.join(getUpdateCacheDir(), getPackageFileName(feed.downloadUrl, feed.latestVersion));
+}
+
+function getPreparedPackageInfo(feed) {
+  const packagePath = getPreparedPackagePath(feed);
+  if (!packagePath || !fs.existsSync(packagePath)) {
+    return { readyToInstall: false, downloadedPath: '', downloadStatus: feed?.updateAvailable ? 'idle' : 'none' };
+  }
+
+  return {
+    readyToInstall: true,
+    downloadedPath: packagePath,
+    downloadStatus: 'ready',
+  };
+}
+
+function getLocalSourcePath(downloadUrl) {
+  const nextUrl = String(downloadUrl || '').trim();
+  if (!nextUrl) return '';
+
+  if (/^file:\/\//i.test(nextUrl)) {
+    return fileURLToPath(nextUrl);
+  }
+  if (/^[a-zA-Z]:[\\/]/.test(nextUrl) || nextUrl.startsWith('\\\\')) {
+    return nextUrl;
+  }
+  return '';
+}
+
+async function downloadPackage(downloadUrl, destinationPath) {
+  const nextUrl = String(downloadUrl || '').trim();
+  if (!nextUrl) {
+    return {
+      ok: false,
+      downloadStatus: 'missing-url',
+      message: 'Update je dostupny, ale manifest zatim nema downloadUrl.',
+    };
+  }
+
+  await fsp.mkdir(path.dirname(destinationPath), { recursive: true });
+
+  const localSource = getLocalSourcePath(nextUrl);
+  if (localSource) {
+    await fsp.copyFile(localSource, destinationPath);
+    return {
+      ok: true,
+      downloadStatus: 'ready',
+      downloadedPath: destinationPath,
+      message: 'Update balicek je pripraveny.',
+    };
+  }
+
+  if (!/^https?:\/\//i.test(nextUrl)) {
+    return {
+      ok: false,
+      downloadStatus: 'invalid-url',
+      message: 'Update downloadUrl musi byt http, https, file URL nebo lokalni cesta.',
+    };
+  }
+
+  const response = await fetch(nextUrl);
+  if (!response.ok) {
+    return {
+      ok: false,
+      downloadStatus: 'failed',
+      message: `Stazeni update selhalo: HTTP ${response.status}.`,
+    };
+  }
+
+  const arrayBuffer = await response.arrayBuffer();
+  await fsp.writeFile(destinationPath, Buffer.from(arrayBuffer));
+
+  return {
+    ok: true,
+    downloadStatus: 'ready',
+    downloadedPath: destinationPath,
+    message: 'Update balicek je pripraveny.',
+  };
+}
+
 export function buildUpdateFeed() {
   const manifest = readUpdateManifest();
   const currentVersion = app.getVersion();
   const latestVersion = manifest?.latestVersion || currentVersion;
   const updateAvailable = compareVersions(latestVersion, currentVersion) > 0;
-
-  return {
+  const baseFeed = {
     currentVersion,
     latestVersion,
     publishedAt: manifest?.publishedAt || '',
@@ -71,6 +187,87 @@ export function buildUpdateFeed() {
     updateAvailable,
     downloadUrl: manifest?.downloadUrl || '',
     entries: manifest?.entries || [],
+  };
+  const packageInfo = getPreparedPackageInfo(baseFeed);
+
+  return {
+    ...baseFeed,
+    ...packageInfo,
+    autoDownloadSupported: Boolean(baseFeed.downloadUrl),
+  };
+}
+
+export async function prepareUpdateDownload() {
+  const feed = buildUpdateFeed();
+  if (!feed.updateAvailable) {
+    return {
+      ...feed,
+      ok: true,
+      message: 'LunaAI uz bezi na nejnovejsi verzi.',
+    };
+  }
+  if (feed.readyToInstall) {
+    return {
+      ...feed,
+      ok: true,
+      message: 'Nova verze je pripravena k instalaci.',
+    };
+  }
+  if (!feed.downloadUrl) {
+    return {
+      ...feed,
+      ok: false,
+      downloadStatus: 'missing-url',
+      message: 'Nova verze je dostupna, ale update manifest zatim nema downloadUrl.',
+    };
+  }
+  if (downloadTask) {
+    return downloadTask;
+  }
+
+  const destinationPath = getPreparedPackagePath(feed);
+  downloadTask = downloadPackage(feed.downloadUrl, destinationPath)
+    .then((result) => ({
+      ...buildUpdateFeed(),
+      ...result,
+    }))
+    .catch((error) => ({
+      ...buildUpdateFeed(),
+      ok: false,
+      downloadStatus: 'failed',
+      message: `Stazeni update selhalo: ${error}`,
+    }))
+    .finally(() => {
+      downloadTask = null;
+    });
+
+  return downloadTask;
+}
+
+export async function restartAndInstallUpdate() {
+  const feed = buildUpdateFeed();
+  if (!feed.readyToInstall || !feed.downloadedPath) {
+    return {
+      ...feed,
+      ok: false,
+      message: 'Update jeste neni pripraveny k instalaci.',
+    };
+  }
+
+  const openResult = await shell.openPath(feed.downloadedPath);
+  if (openResult) {
+    return {
+      ...feed,
+      ok: false,
+      message: `Update balicek se nepodarilo otevrit: ${openResult}`,
+    };
+  }
+
+  setTimeout(() => app.quit(), 300);
+  return {
+    ...feed,
+    ok: true,
+    message: 'Update installer se spousti. LunaAI se zavre.',
   };
 }
 
@@ -87,4 +284,3 @@ export function openUpdateDownload(downloadUrl) {
     return { ok: false, message: `Update download could not be opened. ${error}` };
   }
 }
-

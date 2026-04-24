@@ -5,7 +5,7 @@ import os from 'node:os';
 import fs from 'node:fs/promises';
 
 import { readRuntimeSettings, writeRuntimeSettings } from './services/runtimeSettings.js';
-import { buildUpdateFeed, openUpdateDownload } from './services/updates.js';
+import { buildUpdateFeed, openUpdateDownload, prepareUpdateDownload, restartAndInstallUpdate } from './services/updates.js';
 import { getApplicationsState, launchApplication, updateApplicationPath } from './services/applications.js';
 import { runLunaBridge } from './services/lunaBridge.js';
 import { createSystemMetricsReader } from './services/systemMetrics.js';
@@ -319,6 +319,14 @@ ipcMain.handle('updates:check', () => {
 ipcMain.handle('updates:download', (_, downloadUrl) => {
   const feed = buildUpdateFeed();
   return openUpdateDownload(String(downloadUrl || feed.downloadUrl || ''));
+});
+
+ipcMain.handle('updates:prepare', () => {
+  return prepareUpdateDownload();
+});
+
+ipcMain.handle('updates:restart-and-install', () => {
+  return restartAndInstallUpdate();
 });
 
 ipcMain.handle('luna:get-state', async () => {

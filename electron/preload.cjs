@@ -30,6 +30,8 @@ contextBridge.exposeInMainWorld('lunaDesktop', {
     getFeed: () => ipcRenderer.invoke('updates:get-feed'),
     check: () => ipcRenderer.invoke('updates:check'),
     download: (downloadUrl) => ipcRenderer.invoke('updates:download', downloadUrl),
+    prepare: () => ipcRenderer.invoke('updates:prepare'),
+    restartAndInstall: () => ipcRenderer.invoke('updates:restart-and-install'),
   },
   actionEngine: {
     execute: (payload) => ipcRenderer.invoke('action-engine:execute', payload),

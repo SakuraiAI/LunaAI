@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 import os
+import json
 import re
 import subprocess
+import sys
+from datetime import datetime
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
@@ -57,6 +60,7 @@ class DesktopActionTool:
         "create_execution_plan": {"category": "file_change", "label": "Create execution plan"},
         "create_project_scaffold": {"category": "file_change", "label": "Create project scaffold"},
         "open_workspace_in_tool": {"category": "app_launch", "label": "Open workspace in tool"},
+        "run_project": {"category": "project_run", "label": "Run project"},
         "refresh_review_notes": {"category": "file_change", "label": "Refresh review notes"},
         "observe_desktop_state": {"category": "observe", "label": "Observe desktop state"},
     }
@@ -155,6 +159,27 @@ class DesktopActionTool:
         resolved.mkdir(parents=True, exist_ok=True)
         return f"Created folder {resolved}"
 
+    def create_folders_batch(self, targets: list[Path]) -> str:
+        created: list[str] = []
+        existing: list[str] = []
+
+        for path in targets:
+            resolved = Path(path).expanduser()
+            if resolved.exists():
+                existing.append(str(resolved))
+            else:
+                resolved.mkdir(parents=True, exist_ok=True)
+                created.append(str(resolved))
+
+        parts: list[str] = []
+        if created:
+            parts.append(f"Created {len(created)} folders: {', '.join(created)}")
+        if existing:
+            parts.append(f"{len(existing)} folders already existed: {', '.join(existing)}")
+        if not parts:
+            return "No folders were created."
+        return ". ".join(parts) + "."
+
     def create_file(self, path: Path, content: str = "") -> str:
         resolved = Path(path).expanduser()
         resolved.parent.mkdir(parents=True, exist_ok=True)
@@ -223,6 +248,421 @@ class DesktopActionTool:
             }
         )
         return workspace
+
+    def create_python_calculator(self, workspace: Path) -> str:
+        target_workspace = Path(workspace).expanduser()
+        self.create_folder(target_workspace / "src")
+        main_file = target_workspace / "src" / "main.py"
+        init_file = target_workspace / "src" / "__init__.py"
+        readme_file = target_workspace / "README.md"
+
+        calculator_code = '''from __future__ import annotations
+
+
+def add(left: float, right: float) -> float:
+    return left + right
+
+
+def subtract(left: float, right: float) -> float:
+    return left - right
+
+
+def multiply(left: float, right: float) -> float:
+    return left * right
+
+
+def divide(left: float, right: float) -> float:
+    if right == 0:
+        raise ValueError("Division by zero is not allowed.")
+    return left / right
+
+
+OPERATIONS = {
+    "+": add,
+    "-": subtract,
+    "*": multiply,
+    "/": divide,
+}
+
+
+def read_number(label: str) -> float:
+    while True:
+        raw_value = input(f"{label}: ").strip().replace(",", ".")
+        try:
+            return float(raw_value)
+        except ValueError:
+            print("Please enter a valid number.")
+
+
+def read_operation() -> str:
+    while True:
+        operation = input("Operation (+, -, *, /): ").strip()
+        if operation in OPERATIONS:
+            return operation
+        print("Choose one of: +, -, *, /")
+
+
+def run_calculator() -> None:
+    print("LunaAI Calculator")
+    print("Type Ctrl+C to exit.\\n")
+
+    while True:
+        left = read_number("First number")
+        operation = read_operation()
+        right = read_number("Second number")
+
+        try:
+            result = OPERATIONS[operation](left, right)
+        except ValueError as error:
+            print(f"Error: {error}\\n")
+            continue
+
+        print(f"Result: {left:g} {operation} {right:g} = {result:g}\\n")
+
+
+if __name__ == "__main__":
+    run_calculator()
+'''
+
+        files = {
+            main_file: calculator_code,
+            init_file: "",
+        }
+        if not readme_file.exists():
+            files[readme_file] = (
+                "# Calculator\n\n"
+                "Small Python calculator created by LunaAI.\n\n"
+                "Run it with:\n\n"
+                "```bash\n"
+                "python src/main.py\n"
+                "```\n"
+            )
+
+        message = self.create_files_batch(files)
+        return f"{message} Calculator code is ready in {main_file}."
+
+    def create_project_scripts(self, workspace: Path) -> str:
+        target_workspace = Path(workspace).expanduser()
+        scripts_folder = target_workspace / "scripts"
+        self.create_folder(scripts_folder)
+
+        init_script = r'''@echo off
+setlocal
+cd /d "%~dp0.."
+
+echo Preparing LunaAI project workspace...
+if not exist src mkdir src
+if not exist docs mkdir docs
+if not exist tests mkdir tests
+if not exist scripts mkdir scripts
+
+if not exist .venv (
+  python -m venv .venv
+)
+
+call .venv\Scripts\activate.bat
+if exist requirements.txt (
+  python -m pip install -r requirements.txt
+) else (
+  echo No requirements.txt found. Skipping dependency install.
+)
+
+echo Workspace is ready.
+pause
+'''
+        run_project_script = r'''@echo off
+setlocal
+cd /d "%~dp0.."
+
+if exist .venv\Scripts\activate.bat (
+  call .venv\Scripts\activate.bat
+)
+
+if exist package.json (
+  where npm >nul 2>nul
+  if %ERRORLEVEL% EQU 0 (
+    npm run dev
+    pause
+    exit /b
+  )
+)
+
+if exist src\main.py (
+  python -u src\main.py
+) else if exist main.py (
+  python -u main.py
+) else if exist app.py (
+  python -u app.py
+) else (
+  echo No runnable entrypoint found. Expected package.json, src\main.py, main.py, or app.py.
+)
+
+pause
+'''
+        run_calculator_script = r'''@echo off
+setlocal
+cd /d "%~dp0.."
+
+if exist .venv\Scripts\activate.bat (
+  call .venv\Scripts\activate.bat
+)
+
+if exist src\main.py (
+  python -u src\main.py
+) else (
+  echo Calculator entrypoint not found: src\main.py
+)
+
+pause
+'''
+        run_tests_script = r'''@echo off
+setlocal
+cd /d "%~dp0.."
+
+if exist .venv\Scripts\activate.bat (
+  call .venv\Scripts\activate.bat
+)
+
+if exist tests (
+  python -m pytest tests
+) else (
+  echo Tests folder does not exist yet.
+)
+
+pause
+'''
+
+        files = {
+            scripts_folder / "init_workspace.bat": init_script,
+            scripts_folder / "run_project.bat": run_project_script,
+            scripts_folder / "run_calc.bat": run_calculator_script,
+            scripts_folder / "run_tests.bat": run_tests_script,
+        }
+        message = self.create_files_batch(files)
+        return f"{message} Project scripts are ready in {scripts_folder}."
+
+    def create_simple_web_page(self, workspace: Path, description: str = "") -> str:
+        target_workspace = Path(workspace).expanduser()
+        web_folder = target_workspace / "web"
+        self.create_folder(web_folder)
+
+        lowered_description = description.lower()
+        title = "LunaAI Web"
+        headline = "A clean web page built with LunaAI"
+        subheadline = "Small, readable, and ready to customize."
+        if "portfolio" in lowered_description:
+            title = "Portfolio"
+            headline = "Portfolio"
+            subheadline = "A focused place for projects, skills, and contact."
+        elif "landing" in lowered_description:
+            title = "Landing Page"
+            headline = "Launch your idea"
+            subheadline = "A simple landing page with a clear call to action."
+
+        index_html = f'''<!doctype html>
+<html lang="cs">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{title}</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <main class="page-shell">
+    <section class="hero">
+      <p class="eyebrow">Created with LunaAI</p>
+      <h1>{headline}</h1>
+      <p class="lead">{subheadline}</p>
+      <div class="actions">
+        <a href="#projects" class="button primary">View projects</a>
+        <a href="#contact" class="button secondary">Contact</a>
+      </div>
+    </section>
+
+    <section id="projects" class="cards" aria-label="Project highlights">
+      <article class="card">
+        <span>01</span>
+        <h2>Structure</h2>
+        <p>HTML keeps the content clear and easy to edit.</p>
+      </article>
+      <article class="card">
+        <span>02</span>
+        <h2>Style</h2>
+        <p>CSS gives the page a dark, polished visual direction.</p>
+      </article>
+      <article class="card">
+        <span>03</span>
+        <h2>Motion</h2>
+        <p>JavaScript adds a small status line when the page loads.</p>
+      </article>
+    </section>
+
+    <section id="contact" class="contact">
+      <h2>Ready to build the next section?</h2>
+      <p id="status">Page loaded.</p>
+    </section>
+  </main>
+  <script src="script.js"></script>
+</body>
+</html>
+'''
+        styles_css = '''* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  font-family: "Trebuchet MS", "Segoe UI", sans-serif;
+  background:
+    radial-gradient(circle at 20% 10%, rgba(255, 255, 255, 0.14), transparent 26rem),
+    linear-gradient(135deg, #101010 0%, #181512 48%, #0b0b0b 100%);
+  color: #f6f1e8;
+}
+
+.page-shell {
+  width: min(1120px, calc(100% - 32px));
+  margin: 0 auto;
+  padding: 72px 0;
+}
+
+.hero {
+  min-height: 62vh;
+  display: grid;
+  align-content: center;
+}
+
+.eyebrow {
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: #d8b86a;
+  font-weight: 700;
+}
+
+h1 {
+  margin: 0;
+  max-width: 820px;
+  font-size: clamp(3rem, 9vw, 7rem);
+  line-height: 0.92;
+}
+
+.lead {
+  max-width: 620px;
+  color: #cfc7b7;
+  font-size: 1.25rem;
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  margin-top: 22px;
+}
+
+.button {
+  border-radius: 999px;
+  padding: 14px 20px;
+  text-decoration: none;
+  font-weight: 800;
+}
+
+.primary {
+  background: #f6f1e8;
+  color: #111;
+}
+
+.secondary {
+  border: 1px solid rgba(246, 241, 232, 0.28);
+  color: #f6f1e8;
+}
+
+.cards {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.card,
+.contact {
+  border: 1px solid rgba(246, 241, 232, 0.12);
+  border-radius: 28px;
+  background: rgba(255, 255, 255, 0.06);
+  padding: 24px;
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.26);
+}
+
+.card span {
+  color: #d8b86a;
+  font-weight: 900;
+}
+
+.contact {
+  margin-top: 16px;
+}
+
+@media (max-width: 760px) {
+  .cards {
+    grid-template-columns: 1fr;
+  }
+}
+'''
+        script_js = '''const statusLine = document.querySelector("#status");
+
+if (statusLine) {
+  const time = new Date().toLocaleTimeString();
+  statusLine.textContent = `Page ready at ${time}.`;
+}
+'''
+        readme = '''# Web Page
+
+This folder contains a small static web page created by LunaAI.
+
+Files:
+- `index.html` keeps the page content and layout.
+- `styles.css` controls the visual design.
+- `script.js` adds a tiny interactive status update.
+
+Open `index.html` in a browser to preview it.
+'''
+
+        files = {
+            web_folder / "index.html": index_html,
+            web_folder / "styles.css": styles_css,
+            web_folder / "script.js": script_js,
+            web_folder / "README.md": readme,
+        }
+        message = self.create_files_batch(files)
+        return f"{message} Web page is ready in {web_folder}."
+
+    def create_email_draft(
+        self,
+        workspace: Path,
+        *,
+        recipient: str = "",
+        subject: str = "",
+        body: str = "",
+    ) -> str:
+        target_workspace = Path(workspace).expanduser()
+        drafts_folder = target_workspace / "drafts"
+        self.create_folder(drafts_folder)
+
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        draft_file = drafts_folder / f"email_{timestamp}.md"
+        cleaned_recipient = recipient.strip() or "TODO: doplnit prijemce"
+        cleaned_subject = subject.strip() or "TODO: doplnit predmet"
+        cleaned_body = body.strip() or "TODO: doplnit text zpravy"
+        draft = (
+            "# Email Draft\n\n"
+            "Status: not sent\n"
+            f"To: {cleaned_recipient}\n"
+            f"Subject: {cleaned_subject}\n\n"
+            "## Body\n\n"
+            f"{cleaned_body}\n\n"
+            "---\n"
+            "Safety note: LunaAI only prepared this draft. It did not send the email.\n"
+        )
+        self.create_file(draft_file, draft)
+        return f"Email draft is ready in {draft_file}. Nothing was sent."
 
     def create_web_project(self, project_name: str) -> Path:
         workspace = self.ensure_project_workspace(project_name)
@@ -322,6 +762,86 @@ class DesktopActionTool:
             return self.open_path(target)
         subprocess.Popen([vscode_path, str(target)])
         return f"Opened {target} in VS Code"
+
+    def _npm_run_command(self, script_name: str) -> list[str]:
+        if os.name == "nt":
+            if script_name == "start":
+                return ["cmd", "/c", "npm", "start"]
+            return ["cmd", "/c", "npm", "run", script_name]
+        if script_name == "start":
+            return ["npm", "start"]
+        return ["npm", "run", script_name]
+
+    def _detect_npm_run_command(self, workspace: Path) -> tuple[list[str], str] | None:
+        package_file = workspace / "package.json"
+        if not package_file.exists():
+            return None
+        try:
+            package_data = json.loads(package_file.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return None
+        scripts = package_data.get("scripts", {})
+        if not isinstance(scripts, dict):
+            return None
+        for script_name in ["dev", "start", "build"]:
+            if isinstance(scripts.get(script_name), str):
+                command = self._npm_run_command(script_name)
+                label = "npm start" if script_name == "start" else f"npm run {script_name}"
+                return command, label
+        return None
+
+    def _detect_python_run_command(self, workspace: Path) -> tuple[list[str], str] | None:
+        for relative_entry in ["src/main.py", "main.py", "app.py"]:
+            entry = workspace / relative_entry
+            if entry.exists() and entry.is_file():
+                return [sys.executable, relative_entry], f"python {relative_entry}"
+        return None
+
+    def detect_project_run_command(self, workspace: Path) -> tuple[list[str], str] | None:
+        target_workspace = Path(workspace).expanduser().resolve()
+        return self._detect_npm_run_command(target_workspace) or self._detect_python_run_command(target_workspace)
+
+    def run_project(self, workspace: Path) -> dict[str, str | bool]:
+        target_workspace = Path(workspace).expanduser().resolve()
+        if not target_workspace.exists():
+            return self._result(
+                ok=False,
+                status="failed",
+                message=f"Workspace neexistuje: {target_workspace}",
+                detail=f"Project workspace was not found: {target_workspace}",
+                category="project_run",
+                action_key="run_project",
+                workspace=str(target_workspace),
+            )
+
+        detected = self.detect_project_run_command(target_workspace)
+        if detected is None:
+            return self._result(
+                ok=False,
+                status="failed",
+                message="Projekt zatim nema jasny spousteci prikaz.",
+                detail="No package.json script or Python entrypoint was found. Expected package.json, src/main.py, main.py, or app.py.",
+                category="project_run",
+                action_key="run_project",
+                workspace=str(target_workspace),
+            )
+
+        command, label = detected
+        popen_kwargs: dict[str, object] = {"cwd": str(target_workspace)}
+        creation_flags = getattr(subprocess, "CREATE_NEW_CONSOLE", 0) if os.name == "nt" else 0
+        if creation_flags:
+            popen_kwargs["creationflags"] = creation_flags
+        subprocess.Popen(command, **popen_kwargs)
+
+        return self._result(
+            ok=True,
+            status="completed",
+            message=f"Spoustim projekt pres `{label}` v {target_workspace}.",
+            detail=f"Command: {' '.join(command)}",
+            category="project_run",
+            action_key="run_project",
+            workspace=str(target_workspace),
+        )
 
     def _app_path_for(self, app_key: str, workspace_settings: UserWorkspaceSettings) -> str:
         field_name = self.APP_PATH_FIELDS.get(app_key, "")

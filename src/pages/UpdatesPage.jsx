@@ -108,47 +108,74 @@ export default function UpdatesPage({
     }
   }
 
-  async function handleDownloadUpdate() {
+  async function handlePrepareUpdate() {
     const api = window.lunaDesktop?.updates;
-    if (!api?.download) {
-      onStatusChange?.('Sta\u017een\u00ed update funguje a\u017e v Electron desktop shellu.');
+    if (!api?.prepare) {
+      onStatusChange?.('Automatick\u00e9 sta\u017een\u00ed update funguje a\u017e v Electron desktop shellu.');
       return;
     }
 
     setBusy(true);
     try {
-      const result = await api.download(feed.downloadUrl || '');
-      onStatusChange?.(result?.message || 'Sta\u017een\u00ed update bylo spu\u0161t\u011bn\u00e9.');
+      const result = await api.prepare();
+      applyFeed(result);
+      onStatusChange?.(result?.message || 'Update se p\u0159ipravuje na pozad\u00ed.');
     } catch {
-      onStatusChange?.('Sta\u017een\u00ed update se nepoda\u0159ilo otev\u0159\u00edt.');
+      onStatusChange?.('Update se nepoda\u0159ilo p\u0159ipravit.');
     } finally {
       setBusy(false);
     }
   }
+
+  async function handleRestartAndUpdate() {
+    const api = window.lunaDesktop?.updates;
+    if (!api?.restartAndInstall) {
+      onStatusChange?.('Restart & Update funguje a\u017e v Electron desktop shellu.');
+      return;
+    }
+
+    setBusy(true);
+    try {
+      const result = await api.restartAndInstall();
+      applyFeed(result);
+      onStatusChange?.(result?.message || 'Restart & Update byl spu\u0161t\u011bn\u00fd.');
+    } catch {
+      onStatusChange?.('Restart & Update se nepoda\u0159ilo spustit.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const updateReady = Boolean(feed.readyToInstall);
+  const packageMissing = feed.updateAvailable && feed.downloadStatus === 'missing-url';
 
   return (
     <div className="updates-page-grid">
       <PanelCard title={title} subtitle={subtitle} className="updates-panel-card">
         <div className="updates-summary-card">
           <div className="updates-summary-copy">
-            <span className="updates-summary-label">Aktu\u00e1ln\u00ed verze</span>
+            <span className="updates-summary-label">{'Aktu\u00e1ln\u00ed verze'}</span>
             <strong>{feed.currentVersion || runtimeVersion || '0.1.0'}</strong>
             <p>
               {feed.updateAvailable
-                ? `Nov\u00e1 verze ${feed.latestVersion} je p\u0159ipraven\u00e1 ke sta\u017een\u00ed.`
+                ? updateReady
+                  ? `Nov\u00e1 verze ${feed.latestVersion} je sta\u017een\u00e1 a p\u0159ipraven\u00e1 k restartu.`
+                  : packageMissing
+                    ? `Nov\u00e1 verze ${feed.latestVersion} je dostupn\u00e1, ale manifest je\u0161t\u011b nem\u00e1 downloadUrl.`
+                    : `Nov\u00e1 verze ${feed.latestVersion} se p\u0159ipravuje na pozad\u00ed.`
                 : 'LunaAI je te\u010f synchronizovan\u00e1 s dostupn\u00fdm release feedem.'}
             </p>
           </div>
           <div className="updates-summary-meta">
             <div>
-              <span>Nejnov\u011bj\u0161\u00ed</span>
+              <span>{'Nejnov\u011bj\u0161\u00ed'}</span>
               <strong>{feed.latestVersion || runtimeVersion || '0.1.0'}</strong>
               <small>{feed.publishedAt || '\u010cek\u00e1 se na release feed'}</small>
             </div>
             <div>
-              <span>Kan\u00e1l</span>
+              <span>{'Kan\u00e1l'}</span>
               <strong>{feed.channel || 'stable'}</strong>
-              <small>{feed.updateAvailable ? 'Update je k dispozici' : 'V\u0161echno je aktu\u00e1ln\u00ed'}</small>
+              <small>{updateReady ? 'P\u0159ipraveno k restartu' : feed.updateAvailable ? 'Update je k dispozici' : 'V\u0161echno je aktu\u00e1ln\u00ed'}</small>
             </div>
           </div>
           <div className="updates-summary-actions">
@@ -158,10 +185,10 @@ export default function UpdatesPage({
             <button
               type="button"
               className="primary-button updates-action-button"
-              onClick={handleDownloadUpdate}
-              disabled={busy || !feed.updateAvailable}
+              onClick={updateReady ? handleRestartAndUpdate : handlePrepareUpdate}
+              disabled={busy || !feed.updateAvailable || packageMissing}
             >
-              St\u00e1hnout update
+              {updateReady ? 'Restart & Update' : packageMissing ? '\u010cek\u00e1 na bal\u00ed\u010dek' : 'P\u0159ipravit update'}
             </button>
           </div>
         </div>
@@ -198,7 +225,7 @@ export default function UpdatesPage({
             </div>
             <p className="update-detail-copy">{selected.detail}</p>
             <div className="update-notes-block">
-              <span>Co se zm\u011bnilo</span>
+              <span>{'Co se zm\u011bnilo'}</span>
               <div className="update-notes-list">
                 {selected.notes?.map((note, index) => (
                   <div key={`${selected.id}-note-${index}`} className="update-note-item">

@@ -1,7 +1,6 @@
 export const sidebarSections = [
   { key: 'gallery', label: 'Gallery' },
   { key: 'projects', label: 'Projects' },
-  { key: 'updates', label: 'Updates' },
   { key: 'friends', label: 'Friends' },
 ];
 

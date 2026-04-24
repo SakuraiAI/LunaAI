@@ -25,7 +25,7 @@ from app.tools.desktop_observer import DesktopObserverTool
 from app.tools.internet import InternetTool
 from app.workflow.manager import WorkflowManager
 from app.xeno.coordinator import XenoCoordinator
-from app.core.text_utils import repair_text
+from app.core.text_utils import ascii_fold_text, repair_text
 
 
 class LunaEngine:
@@ -76,7 +76,8 @@ class LunaEngine:
         self.action_log = ActionLogStore(Path("data/logs/action_log.jsonl"))
         self.system_control = SystemControlLayer()
         self.system_control.apply_profile(self.user_settings.data, self.user_settings.data.system_control_profile)
-        self.pending_action: tuple[str, str, Callable[[], str]] | None = None
+        self.pending_action: tuple[str, str, Callable[[], object]] | None = None
+        self.pending_action_plan: dict[str, object] | None = None
         self._action_mode_override: str | None = None
         self.observe_mode_enabled = False
         self.last_desktop_observation: dict[str, object] | None = None
@@ -511,6 +512,8 @@ class LunaEngine:
             return bool(workspace.allow_path_open)
         if category == "file_change":
             return bool(workspace.allow_file_changes)
+        if category == "project_run":
+            return bool(workspace.allow_app_launch)
         return True
 
     def _log_action(self, category: str, title: str, status: str, detail: str) -> None:
@@ -713,7 +716,7 @@ class LunaEngine:
         return "Luna: Pozorovani obrazovky jsem vypnula."
 
     def _handle_observation_command(self, user_input: str) -> str | None:
-        normalized = " ".join(user_input.strip().lower().split())
+        normalized = ascii_fold_text(" ".join(user_input.strip().lower().split()))
         screenshot_triggers = {
             "zachyt obrazovku",
             "vyfot obrazovku",
@@ -767,7 +770,7 @@ class LunaEngine:
         return None
 
     def _handle_local_capability_command(self, user_input: str) -> str | None:
-        normalized = " ".join(user_input.strip().lower().split())
+        normalized = ascii_fold_text(" ".join(user_input.strip().lower().split()))
         triggers = {
             "co umis na pc",
             "co umis delat na pc",
@@ -841,6 +844,9 @@ class LunaEngine:
         message = repair_text(str(result.get("message", "")).strip())
         detail = repair_text(str(result.get("detail", "")).strip())
         if pending:
+            xeno_note = repair_text(str(result.get("xeno_note", "")).strip())
+            if xeno_note:
+                return f"Luna: Xeno zkontroloval plán: {xeno_note} Akce je připravená. Stačí dát Accept, nebo ji zrušit přes Cancel. 🙂"
             return "Luna: Akce je připravená. Stačí dát Accept, nebo ji zrušit přes Cancel. 🙂"
         if status == "blocked":
             return f"Luna: Tuhle akci ted nemuzu spustit. {detail or message}".strip()
@@ -849,6 +855,61 @@ class LunaEngine:
         if status == "cancelled":
             return f"Luna: Akci jsem zrusila. {detail or message}".strip()
         return f"Luna: {message}".strip()
+
+    def _action_plan_note(self, action_plan: dict[str, object] | None, limit: int = 190) -> str:
+        if not action_plan:
+            return ""
+        note = repair_text(str(action_plan.get("reason", "")).strip())
+        if len(note) > limit:
+            note = note[: limit - 1].rstrip() + "…"
+        return note
+
+    def _set_action_coordination(
+        self,
+        *,
+        category: str,
+        title: str,
+        action_plan: dict[str, object] | None,
+        phase: str,
+    ) -> None:
+        xeno_note = self._action_plan_note(action_plan) or "Xeno drží kontrolu rizika a další bezpečný krok."
+        luna_note = "Připravuji akci k potvrzení." if phase == "prepare" else "Provádím potvrzenou akci."
+        self.last_coordination = {
+            "lunaActive": True,
+            "xenoActive": True,
+            "tracks": [
+                {
+                    "speaker": "Luna",
+                    "title": "Luna action",
+                    "note": f"{luna_note} {self._compact_coordination_text(title, 120)}",
+                },
+                {
+                    "speaker": "Xeno",
+                    "title": "Xeno action check",
+                    "note": xeno_note,
+                },
+            ],
+        }
+
+    def _plan_action_with_xeno(self, category: str, title: str) -> dict[str, object]:
+        try:
+            action_plan = self.xeno.plan_action(
+                category=category,
+                title=title,
+                project_context=self._project_context(),
+                desktop_context=self._observer_context(refresh=False),
+            )
+        except Exception as error:
+            action_plan = {
+                "status": "approved",
+                "intent": category,
+                "risk": "medium",
+                "requiresConfirmation": True,
+                "recommendedAction": title,
+                "reason": f"Xeno kontrola spadla, Luna proto drží konzervativní režim potvrzení. Detail: {error}",
+                "category": category,
+            }
+        return action_plan
 
     def _project_memory_sections(self, project: object) -> dict[str, list[str]]:
         buckets = {"execution": [], "handoff": [], "focus": [], "other": []}
@@ -868,6 +929,21 @@ class LunaEngine:
         if self.pending_action is not None and self.pending_action[1] != title:
             current_title = self.pending_action[1]
             return f"Luna: Nejdriv prosim vyrid cekajici akci `{current_title}`. Pak muzu pripravit dalsi."
+        action_plan = self._plan_action_with_xeno(category, title)
+        self._set_action_coordination(category=category, title=title, action_plan=action_plan, phase="prepare")
+        if str(action_plan.get("status", "")).strip().lower() == "blocked":
+            result = self._coerce_action_result(
+                {
+                    "ok": False,
+                    "status": "blocked",
+                    "message": "Xeno tuhle akci zastavil.",
+                    "detail": self._action_plan_note(action_plan) or "Xeno marked this action as blocked.",
+                },
+                category=category,
+                title=title,
+            )
+            self._log_action(category, title, "blocked", str(result.get("detail", "")))
+            return self._format_action_result_for_chat(result)
         if not self._is_action_allowed(category):
             result = self._coerce_action_result(
                 {
@@ -897,9 +973,18 @@ class LunaEngine:
             return self._format_action_result_for_chat(result)
         if mode == "ask":
             self.pending_action = (category, title, callback)
+            self.pending_action_plan = action_plan
             self._log_action(category, title, "pending", f"Pending approval for {title}.")
-            return self._format_action_result_for_chat({"status": "pending", "message": "pending"}, pending=True)
+            return self._format_action_result_for_chat(
+                {
+                    "status": "pending",
+                    "message": "pending",
+                    "xeno_note": self._action_plan_note(action_plan),
+                },
+                pending=True,
+            )
         try:
+            self._set_action_coordination(category=category, title=title, action_plan=action_plan, phase="execute")
             result = self._coerce_action_result(callback(), category=category, title=title)
         except OSError as error:
             result = self._coerce_action_result(
@@ -938,8 +1023,11 @@ class LunaEngine:
         if self.pending_action is None:
             return "Luna: Ted tu nemam zadnou cekajici akci."
         category, title, callback = self.pending_action
+        action_plan = self.pending_action_plan
         self.pending_action = None
+        self.pending_action_plan = None
         if normalized in {"zrus akci", "cancel action"}:
+            self._set_action_coordination(category=category, title=title, action_plan=action_plan, phase="prepare")
             result = self._coerce_action_result(
                 {
                     "ok": False,
@@ -953,6 +1041,7 @@ class LunaEngine:
             self._log_action(category, title, "cancelled", str(result.get("detail", "")))
             return self._format_action_result_for_chat(result)
         try:
+            self._set_action_coordination(category=category, title=title, action_plan=action_plan, phase="execute")
             result = self._coerce_action_result(callback(), category=category, title=title)
         except OSError as error:
             result = self._coerce_action_result(
@@ -997,6 +1086,54 @@ class LunaEngine:
             return candidate
         return (self._default_action_root() / candidate).resolve()
 
+    def _parse_folder_names(self, raw_targets: str) -> list[str]:
+        cleaned = raw_targets.strip().strip('"').strip("'")
+        if not cleaned:
+            return []
+        if re.fullmatch(r'(?:ve|v)\s+(?:vscode|vs code|projektu|projectu|workspace)', cleaned, flags=re.IGNORECASE):
+            return []
+        cleaned = re.sub(r'(?:^|\s+)(?:ve|v)\s+(?:vscode|vs code|projektu|projectu|workspace)\s*$', '', cleaned, flags=re.IGNORECASE).strip()
+        if not cleaned:
+            return []
+        parts = [part.strip().strip('"').strip("'") for part in re.split(r",|;", cleaned) if part.strip()]
+        if len(parts) == 1 and "/" not in parts[0] and "\\" not in parts[0] and " " in parts[0]:
+            parts = [part.strip() for part in parts[0].split() if part.strip()]
+        return [part for part in parts if part and part not in {".", ".."}]
+
+    def _extract_email_details(self, raw_input: str) -> dict[str, str]:
+        recipient = ""
+        email_match = re.search(r"[\w.+-]+@[\w-]+(?:\.[\w-]+)+", raw_input)
+        if email_match:
+            recipient = email_match.group(0).strip()
+
+        subject = ""
+        subject_match = re.search(
+            r"(?:predmet|p\?edmet|subject)\s*[:\-]?\s*(.+?)(?=\s+(?:text|body|zprava|message)\b|$)",
+            ascii_fold_text(raw_input),
+            flags=re.IGNORECASE,
+        )
+        if subject_match:
+            subject = subject_match.group(1).strip(" .,:;-")
+
+        body = ""
+        body_match = re.search(
+            r"(?:text|body|zprava|message)\s*[:\-]?\s*(.+)$",
+            raw_input,
+            flags=re.IGNORECASE,
+        )
+        if body_match:
+            body = body_match.group(1).strip()
+        if not body:
+            soft_body_match = re.search(r"(?:ze|že)\s+(.+)$", raw_input, flags=re.IGNORECASE)
+            if soft_body_match:
+                body = soft_body_match.group(1).strip()
+
+        return {
+            "recipient": recipient,
+            "subject": subject,
+            "body": body,
+        }
+
     def _search_roots(self) -> list[Path]:
         roots: list[Path] = []
         current_project = self.projects.get_current_project()
@@ -1029,7 +1166,7 @@ class LunaEngine:
         return None
 
     def _split_action_chain(self, user_input: str) -> list[str]:
-        normalized = " ".join(user_input.strip().split())
+        normalized = ascii_fold_text(" ".join(user_input.strip().split()))
 
         targeted_patterns = [
             r'^(otevri(?:t)?|otev\?i(?:t)?|open|spust|spustit|launch) (.+?) a (vytvor|vytvo\?|udelej|ud\?lej|create|make) (.+)$',
@@ -1113,15 +1250,88 @@ class LunaEngine:
         return self._try_local_app_action(user_input)
 
     def _try_local_path_action(self, user_input: str) -> str | None:
-        normalized = " ".join(user_input.strip().split())
+        normalized = ascii_fold_text(" ".join(user_input.strip().split()))
         lowered = normalized.lower()
         if not normalized:
             return None
 
+        email_match = re.search(
+            r'\b(?:posli|po\?li|odesli|ode\?li|napis|napi\?|priprav|vytvor|send|write|draft) (?:mi )?(?:e-?mail|mail)\b|\b(?:e-?mail|mail) (?:na|to)\b',
+            normalized,
+            flags=re.IGNORECASE,
+        )
+        if email_match:
+            details = self._extract_email_details(user_input)
+            recipient_label = details["recipient"] or "recipient to fill in"
+
+            def create_email_draft() -> str:
+                workspace = self._default_action_root()
+                message = self.desktop_actions.create_email_draft(
+                    workspace,
+                    recipient=details["recipient"],
+                    subject=details["subject"],
+                    body=details["body"],
+                )
+                return (
+                    f"{message} Email jsem neodeslala automaticky. "
+                    "Nejdřív ho zkontroluj a odešli ručně ve své emailové aplikaci."
+                )
+
+            return self._guarded_action("communication", f"draft email to {recipient_label}", create_email_draft)
+
+        scripts_match = re.fullmatch(
+            r'(?:vytvor|vytvo\?|udelej|ud\?lej|create|make|priprav|prepare) (?:projektove |project )?(?:skripty|skripty\.?|scripts?|srcipts|scriots|bat skripty|bat scripts)(?: .*)?',
+            normalized,
+            flags=re.IGNORECASE,
+        )
+        if scripts_match:
+            open_in_vscode = "vscode" in lowered or "vs code" in lowered
+
+            def create_scripts() -> str:
+                workspace = self._default_action_root()
+                message = self.desktop_actions.create_project_scripts(workspace)
+                if open_in_vscode:
+                    vscode_message = self.desktop_actions.open_in_vscode(self.user_settings.data.vscode_path, workspace / "scripts")
+                    return f"{message} {vscode_message}."
+                return message
+
+            return self._guarded_action("file_change", "create project scripts", create_scripts)
+
+        run_project_match = re.fullmatch(
+            r'(?:(?:spust|spustit|spus\?)(?: (?:projekt|project|workspace|aplikaci|app|to|tento projekt))?|(?:start|run) (?:project|workspace|app|application))',
+            normalized,
+            flags=re.IGNORECASE,
+        )
+        if run_project_match:
+            workspace = self._default_action_root()
+
+            def run_project() -> dict[str, object]:
+                return self.desktop_actions.run_project(workspace)
+
+            return self._guarded_action("project_run", f"run project {workspace}", run_project)
+
+        calculator_match = re.search(
+            r'(?:vytvor|vytvo\?|udelej|ud\?lej|create|make) (?:python )?(?:kalkulacku|kalkula\?ku|calculator)(?: .*)?$',
+            normalized,
+            flags=re.IGNORECASE,
+        )
+        if calculator_match:
+            open_in_vscode = "vscode" in lowered or "vs code" in lowered
+
+            def create_calculator() -> str:
+                workspace = self._default_action_root()
+                message = self.desktop_actions.create_python_calculator(workspace)
+                if open_in_vscode:
+                    vscode_message = self.desktop_actions.open_in_vscode(self.user_settings.data.vscode_path, workspace)
+                    return f"{message} {vscode_message}."
+                return message
+
+            return self._guarded_action("file_change", "create python calculator", create_calculator)
+
         project_blueprints = [
-            (r'(?:vytvor|vytvo?|udelej|ud\\?lej|create|make) python projekt (.+?)(?: a otevri ve vscode| and open in vscode)?$', "python"),
-            (r'(?:vytvor|vytvo?|udelej|ud\\?lej|create|make) web projekt (.+?)(?: a otevri ve vscode| and open in vscode)?$', "web"),
-            (r'(?:vytvor|vytvo?|udelej|ud\\?lej|create|make) electron projekt (.+?)(?: a otevri ve vscode| and open in vscode)?$', "electron"),
+            (r'(?:vytvor|vytvo\?|udelej|ud\?lej|create|make) python projekt (.+?)(?: a otevri ve vscode| and open in vscode)?$', "python"),
+            (r'(?:vytvor|vytvo\?|udelej|ud\?lej|create|make) web projekt (.+?)(?: a otevri ve vscode| and open in vscode)?$', "web"),
+            (r'(?:vytvor|vytvo\?|udelej|ud\?lej|create|make) electron projekt (.+?)(?: a otevri ve vscode| and open in vscode)?$', "electron"),
         ]
         for pattern, kind in project_blueprints:
             match = re.search(pattern, normalized, flags=re.IGNORECASE)
@@ -1148,7 +1358,34 @@ class LunaEngine:
 
             return self._guarded_action("file_change", f"create {kind} project {project_name}", run_project_creation)
 
-        rewrite_patterns = [r'(?:prepis|p?epi?|rewrite|overwrite) (?:soubor|file) (.+?) (?:s obsahem|with content) (.+)$']
+        web_page_match = re.search(
+            r'(?:vytvor|vytvo\?|udelej|ud\?lej|create|make|postav|build) (?:mi )?(?:jednoduchy |simple |portfolio |landing |webovy |webovou )*(?:web|website|stranku|stranka|webovou stranku|landing page|portfolio)(?: .*)?$',
+            normalized,
+            flags=re.IGNORECASE,
+        )
+        if web_page_match and "web projekt" not in lowered:
+            explain_requested = any(token in lowered for token in ["vysvetli", "vysv?tli", "explain", "popis", "popsat"])
+            open_in_vscode = "vscode" in lowered or "vs code" in lowered
+
+            def create_web_page() -> str:
+                workspace = self._default_action_root()
+                message = self.desktop_actions.create_simple_web_page(workspace, description=user_input)
+                if open_in_vscode:
+                    vscode_message = self.desktop_actions.open_in_vscode(self.user_settings.data.vscode_path, workspace / "web")
+                    message = f"{message} {vscode_message}."
+                if explain_requested:
+                    explanation = (
+                        "Vysvětlení: `web/index.html` drží obsah stránky, "
+                        "`web/styles.css` řeší vzhled a responzivitu, "
+                        "`web/script.js` přidává malou interakci. "
+                        "Náhled otevřeš dvojklikem na `web/index.html` nebo přes Live Server ve VS Code."
+                    )
+                    return f"{message} {explanation}"
+                return message
+
+            return self._guarded_action("file_change", "create simple web page", create_web_page)
+
+        rewrite_patterns = [r'(?:prepis|p\?epis|rewrite|overwrite) (?:soubor|file) (.+?) (?:s obsahem|with content) (.+)$']
         for pattern in rewrite_patterns:
             match = re.search(pattern, normalized, flags=re.IGNORECASE)
             if not match:
@@ -1157,7 +1394,7 @@ class LunaEngine:
             content = match.group(2)
             return self._guarded_action("file_change", f"overwrite file {target}", lambda: self.desktop_actions.overwrite_file(target, content))
 
-        append_patterns = [r'(?:pridej do|p?idej do|append to) (?:souboru|soubor|file) (.+?) (?:obsah|content) (.+)$']
+        append_patterns = [r'(?:pridej do|p\?idej do|append to) (?:souboru|soubor|file) (.+?) (?:obsah|content) (.+)$']
         for pattern in append_patterns:
             match = re.search(pattern, normalized, flags=re.IGNORECASE)
             if not match:
@@ -1167,7 +1404,7 @@ class LunaEngine:
             return self._guarded_action("file_change", f"append to file {target}", lambda: self.desktop_actions.append_to_file(target, content))
 
         multi_file_match = re.search(
-            r'(?:vytvor|vytvo?|udelej|ud\\?lej|create|make) (?:soubory|files) (.+?)(?: (?:a )?otevri ve vscode| (?:and )?open in vscode)?$',
+            r'(?:vytvor|vytvo\?|udelej|ud\?lej|create|make) (?:soubory|files) (.+?)(?: (?:a )?otevri ve vscode| (?:and )?open in vscode)?$',
             normalized,
             flags=re.IGNORECASE,
         )
@@ -1189,7 +1426,7 @@ class LunaEngine:
 
             return self._guarded_action("file_change", f"create files {', '.join(parts)}", create_many_files)
         rich_file_match = re.search(
-            r'(?:vytvor|vytvo?|udelej|ud\\?lej|create|make) (?:soubor|file) (.+?) (?:s obsahem|with content) (.+?)(?: (?:a )?otevri ve vscode| (?:and )?open in vscode)?$',
+            r'(?:vytvor|vytvo\?|udelej|ud\?lej|create|make) (?:soubor|file) (.+?) (?:s obsahem|with content) (.+?)(?: (?:a )?otevri ve vscode| (?:and )?open in vscode)?$',
             normalized,
             flags=re.IGNORECASE,
         )
@@ -1207,7 +1444,30 @@ class LunaEngine:
 
             return self._guarded_action("file_change", f"create file {target}", create_rich_file)
 
-        create_folder_patterns = [r'(?:vytvor|vytvo?|udelej|ud\\?lej|create|make) (?:slozku|slo?ku|folder|adresar|adres??) (.+)$']
+        create_folders_match = re.search(
+            r'(?:vytvor|vytvo\?|udelej|ud\?lej|create|make) (?:slozky|slo\?ky|folders)(?: (.+?))?$',
+            normalized,
+            flags=re.IGNORECASE,
+        )
+        if create_folders_match:
+            raw_targets = str(create_folders_match.group(1) or "").strip()
+            folder_names = self._parse_folder_names(raw_targets)
+            if not folder_names:
+                folder_names = ["src", "docs", "tests", "scripts"]
+            open_in_vscode = "vscode" in lowered or "vs code" in lowered
+
+            def create_many_folders() -> str:
+                workspace = self._default_action_root()
+                targets = [(workspace / folder_name).resolve() for folder_name in folder_names]
+                message = self.desktop_actions.create_folders_batch(targets)
+                if open_in_vscode:
+                    vscode_message = self.desktop_actions.open_in_vscode(self.user_settings.data.vscode_path, workspace)
+                    return f"{message} {vscode_message}."
+                return message
+
+            return self._guarded_action("file_change", f"create folders {', '.join(folder_names)}", create_many_folders)
+
+        create_folder_patterns = [r'(?:vytvor|vytvo\?|udelej|ud\?lej|create|make) (?:slozku|slo\?ku|folder|adresar|adres\?\?) (.+)$']
         for pattern in create_folder_patterns:
             match = re.search(pattern, normalized, flags=re.IGNORECASE)
             if not match:
@@ -1215,7 +1475,7 @@ class LunaEngine:
             target = self._resolve_creation_target(match.group(1))
             return self._guarded_action("file_change", f"create folder {target}", lambda: self.desktop_actions.create_folder(target))
 
-        create_file_patterns = [r'(?:vytvor|vytvo?|udelej|ud\\?lej|create|make) (?:soubor|file) (.+)$']
+        create_file_patterns = [r'(?:vytvor|vytvo\?|udelej|ud\?lej|create|make) (?:soubor|file) (.+)$']
         for pattern in create_file_patterns:
             match = re.search(pattern, normalized, flags=re.IGNORECASE)
             if not match:
@@ -1243,9 +1503,9 @@ class LunaEngine:
             return "Luna: Tu cestu jsem v pocitaci nenasla."
 
         command_patterns = [
-            (r'(?:otevri|otev?i|open) (?:soubor|file) (.+)$', False),
-            (r'(?:otevri|otev?i|open) (?:slozku|slo?ku|folder|adresar|adres??) (.+)$', True),
-            (r'(?:spust|spus?) (?:soubor|file|path|cestu) (.+)$', False),
+            (r'(?:otevri|otev\?i|open) (?:soubor|file) (.+)$', False),
+            (r'(?:otevri|otev\?i|open) (?:slozku|slo\?ku|folder|adresar|adres\?\?) (.+)$', True),
+            (r'(?:spust|spus\?) (?:soubor|file|path|cestu) (.+)$', False),
         ]
         for pattern, prefer_directory in command_patterns:
             match = re.search(pattern, normalized, flags=re.IGNORECASE)
@@ -1283,7 +1543,7 @@ class LunaEngine:
         return None
 
     def _try_local_app_action(self, user_input: str) -> str | None:
-        normalized = " ".join(user_input.strip().lower().split())
+        normalized = ascii_fold_text(" ".join(user_input.strip().lower().split()))
         if not normalized:
             return None
 

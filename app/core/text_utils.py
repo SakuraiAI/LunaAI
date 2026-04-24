@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+import unicodedata
 from urllib.parse import urlparse
 
 _MOJIBAKE_MARKERS = (
@@ -131,6 +132,13 @@ def repair_text(text: str) -> str:
 
     best = min(candidates, key=_mojibake_score)
     return best.replace("\r\n", "\n")
+
+
+def ascii_fold_text(text: str) -> str:
+    """Return a command-friendly copy of text without diacritics."""
+    repaired = repair_text(text)
+    normalized = unicodedata.normalize("NFKD", repaired)
+    return "".join(ch for ch in normalized if not unicodedata.combining(ch))
 
 
 def strip_surrogate_codepoints(text: str) -> str:
