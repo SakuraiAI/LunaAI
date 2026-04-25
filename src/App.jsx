@@ -71,6 +71,27 @@ const defaultRuntimeSettings = {
 const screenShareFrameIntervalMs = 1000;
 const screenShareVisionIntervalMs = 1000;
 
+function normalizeIntentText(value) {
+  return normalizeTransportText(value || '')
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function isStartDesktopShareIntent(value) {
+  const text = normalizeIntentText(value);
+  if (!text) return false;
+
+  const hasShareWord = /\b(share|shere|sdileni|sdilet|sdilej)\b/.test(text);
+  const hasDesktopWord = /\b(desktop|deskop|screen|obrazovk\w*|monitor)\b/.test(text);
+  const hasStartWord = /\b(spust|spustit|sputil|pustim|pustit|pust|zapni|zapnout|start|startni|potrebuji|chci)\b/.test(text);
+
+  return hasShareWord && hasDesktopWord && hasStartWord;
+}
+
 const defaultShareAutomationState = {
   debugPanelOpen: false,
   plannerSummary: '',
@@ -1392,6 +1413,31 @@ export default function App() {
 [Attached file: ${normalizedAttachmentName}]` : baseText;
     let latestSharedFramePath = '';
     let latestSharedFrameSummary = '';
+
+    if (isStartDesktopShareIntent(baseText)) {
+      appendMessages(activeChatId, [
+        { id: `user-${Date.now()}`, role: 'user', author: 'You', content: decoratedText },
+        {
+          id: `assistant-${Date.now() + 1}`,
+          role: 'assistant',
+          author: 'Luna',
+          content: screenShare.active
+            ? 'Luna: Desktop share už běží. Vpravo vidíš živý náhled a Luna/Xeno čtou nové framy. 👀'
+            : 'Luna: Jasně, otevírám výběr zdroje pro Desktop share. Vyber monitor nebo okno a já ho začnu číst jako živý vizuální kontext. 👀',
+        },
+      ]);
+      setComposer('');
+      setAttachment(null);
+      setPendingDesktopContext(null);
+      setPendingGenerationType('');
+      setPage('chat');
+      if (!screenShare.active) {
+        refreshScreenShareSources();
+      } else {
+        setStatus('Desktop share už běží.');
+      }
+      return;
+    }
 
     if (screenShare.active) {
       latestSharedFramePath = await captureSharedDesktopFrame();

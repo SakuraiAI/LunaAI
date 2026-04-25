@@ -2,6 +2,122 @@
 import Orb3D from './Orb3D';
 import { repairDisplayedText } from '../utils/textRepair';
 
+const markdownLinkPattern = /\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/gi;
+const rawLinkPattern = /(https?:\/\/[^\s<>)]+|localhost:\d+(?:\/[^\s<>)]*)?)/gi;
+
+function normalizeLinkHref(value) {
+  const raw = String(value || '').trim();
+  if (/^localhost:/i.test(raw)) {
+    return `http://${raw}`;
+  }
+  return raw;
+}
+
+function trimLinkToken(value) {
+  const token = String(value || '');
+  const match = token.match(/^(.+?)([.,;:!?]+)?$/);
+  if (!match) return { link: token, suffix: '' };
+  return {
+    link: match[1] || token,
+    suffix: match[2] || '',
+  };
+}
+
+function splitRawLinks(text, baseKey) {
+  const parts = [];
+  let cursor = 0;
+  const source = String(text || '');
+
+  for (const match of source.matchAll(rawLinkPattern)) {
+    const index = match.index ?? 0;
+    const fullToken = match[0] || '';
+    if (index > cursor) {
+      parts.push({ type: 'text', text: source.slice(cursor, index), key: `${baseKey}-text-${cursor}` });
+    }
+
+    const { link, suffix } = trimLinkToken(fullToken);
+    parts.push({
+      type: 'link',
+      text: link,
+      href: normalizeLinkHref(link),
+      key: `${baseKey}-link-${index}`,
+    });
+    if (suffix) {
+      parts.push({ type: 'text', text: suffix, key: `${baseKey}-suffix-${index}` });
+    }
+    cursor = index + fullToken.length;
+  }
+
+  if (cursor < source.length) {
+    parts.push({ type: 'text', text: source.slice(cursor), key: `${baseKey}-text-${cursor}` });
+  }
+
+  return parts.length ? parts : [{ type: 'text', text: source, key: `${baseKey}-text-0` }];
+}
+
+function linkifyMessage(text) {
+  const source = repairDisplayedText(text);
+  const parts = [];
+  let cursor = 0;
+
+  for (const match of source.matchAll(markdownLinkPattern)) {
+    const index = match.index ?? 0;
+    const label = match[1] || match[2] || '';
+    const href = match[2] || '';
+    if (index > cursor) {
+      parts.push(...splitRawLinks(source.slice(cursor, index), `before-${index}`));
+    }
+    parts.push({
+      type: 'link',
+      text: label,
+      href,
+      key: `markdown-link-${index}`,
+    });
+    cursor = index + (match[0] || '').length;
+  }
+
+  if (cursor < source.length) {
+    parts.push(...splitRawLinks(source.slice(cursor), `after-${cursor}`));
+  }
+
+  return parts.length ? parts : [{ type: 'text', text: source, key: 'text-0' }];
+}
+
+function MessageContent({ content, trailingCaret = false }) {
+  const parts = linkifyMessage(content);
+
+  const openLink = (event, href) => {
+    event.preventDefault();
+    const targetUrl = normalizeLinkHref(href);
+    if (window.lunaDesktop?.shell?.openExternal) {
+      window.lunaDesktop.shell.openExternal(targetUrl);
+      return;
+    }
+    window.open(targetUrl, '_blank', 'noopener,noreferrer');
+  };
+
+  return (
+    <p>
+      {parts.map((part) => (
+        part.type === 'link' ? (
+          <a
+            key={part.key}
+            className="message-link"
+            href={normalizeLinkHref(part.href)}
+            onClick={(event) => openLink(event, part.href)}
+            rel="noreferrer"
+          >
+            {part.text}
+          </a>
+        ) : (
+          <span key={part.key}>{part.text}</span>
+        )
+      ))}
+      {trailingCaret ? <span className="typing-caret" /> : null}
+    </p>
+  );
+}
+
 function ThinkingPanel({ thinkingState }) {
   if (!thinkingState?.visible) return null;
 
@@ -277,7 +393,7 @@ export default function ChatArea({
           <article key={message.id} className={`message-row ${message.role === 'user' ? 'is-user' : 'is-assistant'}`}>
             <div className={`message-bubble ${message.role === 'user' ? 'is-user' : 'is-assistant'} ${message.author === 'Xeno' ? 'is-xeno' : ''}`}>
               <span className={`message-author ${message.author === 'Xeno' ? 'is-xeno' : ''}`}>{message.author}</span>
-              <p>{repairDisplayedText(message.content)}</p>
+              <MessageContent content={message.content} />
             </div>
           </article>
         ))}
@@ -285,7 +401,7 @@ export default function ChatArea({
           <article className="message-row is-assistant">
             <div className={`message-bubble is-assistant is-revealing ${(revealingMessage.author || 'Luna') === 'Xeno' ? 'is-xeno' : ''}`}>
               <span className={`message-author ${(revealingMessage.author || 'Luna') === 'Xeno' ? 'is-xeno' : ''}`}>{revealingMessage.author || 'Luna'}</span>
-              <p>{repairDisplayedText(revealingMessage.content)}<span className="typing-caret" /></p>
+              <MessageContent content={revealingMessage.content} trailingCaret />
             </div>
           </article>
         ) : null}

@@ -1,4 +1,4 @@
-import { app, BrowserWindow, desktopCapturer, ipcMain, session } from 'electron';
+import { app, BrowserWindow, desktopCapturer, ipcMain, session, shell } from 'electron';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import os from 'node:os';
@@ -286,6 +286,20 @@ ipcMain.handle('screen-share:select-source', async (_, sourceId) => {
 
   pendingScreenShareSourceId = nextSourceId;
   return { ok: true };
+});
+
+ipcMain.handle('shell:open-external', async (_, rawUrl) => {
+  const url = String(rawUrl || '').trim();
+  if (!/^https?:\/\//i.test(url)) {
+    return { ok: false, message: 'Only http and https links can be opened.' };
+  }
+
+  try {
+    await shell.openExternal(url);
+    return { ok: true };
+  } catch (error) {
+    return { ok: false, message: String(error) };
+  }
 });
 
 ipcMain.handle('settings:get-runtime', () => {

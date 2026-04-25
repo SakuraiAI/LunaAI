@@ -757,11 +757,41 @@ Open `index.html` in a browser to preview it.
         except OSError as error:
             return f"Created successfully, but opening failed: {error}"
 
+    def _vscode_command(self, vscode_path: str) -> list[str]:
+        configured_path = Path(vscode_path.strip().strip('"')).expanduser()
+        if configured_path.name.lower() == "code.exe":
+            cli_path = configured_path.parent / "bin" / "code.cmd"
+            if cli_path.exists():
+                return ["cmd", "/c", str(cli_path)]
+        if configured_path.suffix.lower() in {".cmd", ".bat"}:
+            return ["cmd", "/c", str(configured_path)]
+        return [str(configured_path)]
+
     def open_in_vscode(self, vscode_path: str, target: Path) -> str:
+        resolved = Path(target).expanduser().resolve()
         if not vscode_path.strip():
-            return self.open_path(target)
-        subprocess.Popen([vscode_path, str(target)])
-        return f"Opened {target} in VS Code"
+            return self.open_path(resolved)
+        subprocess.Popen([*self._vscode_command(vscode_path), "--reuse-window", str(resolved)])
+        return f"Opened {resolved} in VS Code"
+
+    def open_web_folder_in_vscode(self, vscode_path: str, web_folder: Path) -> str:
+        resolved = Path(web_folder).expanduser().resolve()
+        if not resolved.exists():
+            raise OSError(f"Web folder does not exist: {resolved}")
+        if not resolved.is_dir():
+            raise OSError(f"Expected a web folder, got file: {resolved}")
+
+        index_file = resolved / "index.html"
+        if not vscode_path.strip():
+            return self.open_path(resolved)
+
+        targets = [str(resolved)]
+        if index_file.exists():
+            targets.append(str(index_file))
+        subprocess.Popen([*self._vscode_command(vscode_path), "--reuse-window", *targets])
+        if index_file.exists():
+            return f"Opened {resolved} and index.html in VS Code"
+        return f"Opened {resolved} in VS Code"
 
     def _npm_run_command(self, script_name: str) -> list[str]:
         if os.name == "nt":
@@ -800,6 +830,52 @@ Open `index.html` in a browser to preview it.
     def detect_project_run_command(self, workspace: Path) -> tuple[list[str], str] | None:
         target_workspace = Path(workspace).expanduser().resolve()
         return self._detect_npm_run_command(target_workspace) or self._detect_python_run_command(target_workspace)
+
+    def run_static_web_server(self, web_folder: Path, port: int = 8000) -> dict[str, str | bool]:
+        target_folder = Path(web_folder).expanduser().resolve()
+        if not target_folder.exists() or not target_folder.is_dir():
+            return self._result(
+                ok=False,
+                status="failed",
+                message=f"Web slozka neexistuje: {target_folder}",
+                detail=f"Expected web folder: {target_folder}",
+                category="project_run",
+                action_key="run_static_web_server",
+                workspace=str(target_folder),
+            )
+        if not (target_folder / "index.html").exists():
+            return self._result(
+                ok=False,
+                status="failed",
+                message=f"Ve slozce {target_folder} chybi index.html.",
+                detail="Static web server requires index.html for a useful preview.",
+                category="project_run",
+                action_key="run_static_web_server",
+                workspace=str(target_folder),
+            )
+
+        command = [sys.executable, "-m", "http.server", str(port)]
+        popen_kwargs: dict[str, object] = {"cwd": str(target_folder)}
+        creation_flags = getattr(subprocess, "CREATE_NEW_CONSOLE", 0) if os.name == "nt" else 0
+        if creation_flags:
+            popen_kwargs["creationflags"] = creation_flags
+        subprocess.Popen(command, **popen_kwargs)
+
+        url = f"http://localhost:{port}"
+        try:
+            os.startfile(url)
+        except OSError:
+            pass
+
+        return self._result(
+            ok=True,
+            status="in_progress",
+            message=f"Spoustim webovy server v {target_folder} na {url}.",
+            detail=f"Command: {' '.join(command)}",
+            category="project_run",
+            action_key="run_static_web_server",
+            workspace=str(target_folder),
+        )
 
     def run_project(self, workspace: Path) -> dict[str, str | bool]:
         target_workspace = Path(workspace).expanduser().resolve()
@@ -884,7 +960,7 @@ Open `index.html` in a browser to preview it.
         try:
             if app_key == "vscode":
                 if workspace is not None:
-                    subprocess.Popen([str(target_path), str(workspace)])
+                    subprocess.Popen([*self._vscode_command(str(target_path)), "--reuse-window", str(workspace)])
                     return self._result(
                         ok=True,
                         status="completed",

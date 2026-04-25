@@ -769,6 +769,38 @@ class LunaEngine:
             return self.observe_desktop(include_screenshot=False)
         return None
 
+    def _handle_screen_share_help_command(self, user_input: str) -> str | None:
+        normalized = ascii_fold_text(" ".join(user_input.strip().lower().split()))
+        if not normalized:
+            return None
+        share_terms = [
+            "sdileni obrazovky",
+            "sdilet obrazovku",
+            "share screen",
+            "screen share",
+            "desktop share",
+            "share desktop",
+            "shere desktop",
+            "share deskop",
+            "shere deskop",
+            "deskop share",
+            "zivy nahled",
+            "live stream pro ai",
+            "live vision",
+        ]
+        if not any(term in normalized for term in share_terms):
+            return None
+
+        return (
+            "Luna: Tady nejde o Zoom, Teams ani OBS. V LunaAI se používá vestavěný Desktop share. 👀\n\n"
+            "1. Klikni na `+` vedle pole pro zprávu.\n"
+            "2. Vyber `Desktop share`.\n"
+            "3. Zvol monitor nebo konkrétní okno.\n"
+            "4. Vpravo se má ukázat živý náhled se štítkem `LIVE`.\n"
+            "5. Od té chvíle Luna a Xeno dostávají průběžně obnovované framy jako vizuální kontext.\n\n"
+            "Když se náhled neukáže, problém je v Electron screen-capture vrstvě, ne v nastavení Windows videohovoru."
+        )
+
     def _handle_local_capability_command(self, user_input: str) -> str | None:
         normalized = ascii_fold_text(" ".join(user_input.strip().lower().split()))
         triggers = {
@@ -1165,6 +1197,47 @@ class LunaEngine:
                 continue
         return None
 
+    def _mentions_vscode(self, text: str) -> bool:
+        lowered = ascii_fold_text(text).lower()
+        return any(
+            marker in lowered
+            for marker in [
+                "vscode",
+                "vs code",
+                "vscodu",
+                "vs codu",
+                "visual studio code",
+                "code.exe",
+            ]
+        )
+
+    def _find_recent_workspace_target(self, target_name: str, *, prefer_directory: bool | None = None) -> Path | None:
+        clean_name = target_name.strip().strip('"').strip("'").lower()
+        if not clean_name:
+            return None
+
+        workspace_root = self.desktop_actions.workspace_root
+        if not workspace_root.exists():
+            return None
+
+        candidates: list[Path] = []
+        try:
+            for path in workspace_root.rglob("*"):
+                if path.name.lower() != clean_name:
+                    continue
+                if prefer_directory is True and not path.is_dir():
+                    continue
+                if prefer_directory is False and not path.is_file():
+                    continue
+                candidates.append(path)
+        except OSError:
+            return None
+
+        if not candidates:
+            return None
+        candidates.sort(key=lambda path: path.stat().st_mtime if path.exists() else 0, reverse=True)
+        return candidates[0]
+
     def _split_action_chain(self, user_input: str) -> list[str]:
         normalized = ascii_fold_text(" ".join(user_input.strip().split()))
 
@@ -1285,7 +1358,7 @@ class LunaEngine:
             flags=re.IGNORECASE,
         )
         if scripts_match:
-            open_in_vscode = "vscode" in lowered or "vs code" in lowered
+            open_in_vscode = self._mentions_vscode(normalized)
 
             def create_scripts() -> str:
                 workspace = self._default_action_root()
@@ -1296,6 +1369,23 @@ class LunaEngine:
                 return message
 
             return self._guarded_action("file_change", "create project scripts", create_scripts)
+
+        run_web_match = re.fullmatch(
+            r'(?:(?:spust|spustit|spus\?|pust|pustit|zapni|start|run) (?:mi )?(?:web|webovy server|web server|website|stranku|stranka)(?: .*)?|(?:otevri|otev\?i|open) (?:localhost|web na localhostu)(?: .*)?)',
+            normalized,
+            flags=re.IGNORECASE,
+        )
+        if run_web_match:
+            port_match = re.search(r'(?:port|:)\s*(\d{2,5})', normalized, flags=re.IGNORECASE)
+            port = int(port_match.group(1)) if port_match else 8000
+            web_folder = self._find_named_target("web", prefer_directory=True) or self._find_recent_workspace_target("web", prefer_directory=True)
+            if web_folder is None:
+                return "Luna: Nenasla jsem slozku web, takze nemam co spustit."
+
+            def run_web_server() -> dict[str, object]:
+                return self.desktop_actions.run_static_web_server(web_folder, port=port)
+
+            return self._guarded_action("project_run", f"run static web server {web_folder} on port {port}", run_web_server)
 
         run_project_match = re.fullmatch(
             r'(?:(?:spust|spustit|spus\?)(?: (?:projekt|project|workspace|aplikaci|app|to|tento projekt))?|(?:start|run) (?:project|workspace|app|application))',
@@ -1316,7 +1406,7 @@ class LunaEngine:
             flags=re.IGNORECASE,
         )
         if calculator_match:
-            open_in_vscode = "vscode" in lowered or "vs code" in lowered
+            open_in_vscode = self._mentions_vscode(normalized)
 
             def create_calculator() -> str:
                 workspace = self._default_action_root()
@@ -1340,7 +1430,7 @@ class LunaEngine:
             project_name = match.group(1).strip().strip('"').strip("'")
             if not project_name:
                 return "Luna: Chybi nazev projektu."
-            open_in_vscode = "vscode" in lowered
+            open_in_vscode = self._mentions_vscode(normalized)
 
             def run_project_creation() -> str:
                 if kind == "python":
@@ -1365,14 +1455,41 @@ class LunaEngine:
         )
         if web_page_match and "web projekt" not in lowered:
             explain_requested = any(token in lowered for token in ["vysvetli", "vysv?tli", "explain", "popis", "popsat"])
-            open_in_vscode = "vscode" in lowered or "vs code" in lowered
 
             def create_web_page() -> str:
                 workspace = self._default_action_root()
                 message = self.desktop_actions.create_simple_web_page(workspace, description=user_input)
-                if open_in_vscode:
-                    vscode_message = self.desktop_actions.open_in_vscode(self.user_settings.data.vscode_path, workspace / "web")
-                    message = f"{message} {vscode_message}."
+                web_folder = workspace / "web"
+                index_file = web_folder / "index.html"
+                expected_files = [
+                    web_folder / "index.html",
+                    web_folder / "styles.css",
+                    web_folder / "script.js",
+                    web_folder / "README.md",
+                ]
+                missing_files = [path.name for path in expected_files if not path.exists()]
+                if missing_files:
+                    message = f"{message} Ověření: chybí {', '.join(missing_files)}."
+                else:
+                    message = f"{message} Ověřeno: web/index.html, web/styles.css, web/script.js a web/README.md existují."
+
+                if self._is_action_allowed("path_open"):
+                    try:
+                        self.desktop_actions.open_path(index_file)
+                        message = f"{message} Náhled jsem otevřela v prohlížeči."
+                    except OSError as error:
+                        message = f"{message} Náhled se nepodařilo otevřít automaticky: {error}"
+                else:
+                    message = f"{message} Náhled najdeš tady: {index_file}"
+
+                if self.user_settings.data.vscode_path.strip() and self._is_action_allowed("app_launch"):
+                    try:
+                        vscode_message = self.desktop_actions.open_web_folder_in_vscode(self.user_settings.data.vscode_path, web_folder)
+                        message = f"{message} {vscode_message}."
+                    except OSError as error:
+                        message = f"{message} VS Code se nepodařilo otevřít automaticky: {error}"
+                else:
+                    message = f"{message} Ve VS Code otevři složku: {web_folder}"
                 if explain_requested:
                     explanation = (
                         "Vysvětlení: `web/index.html` drží obsah stránky, "
@@ -1410,7 +1527,7 @@ class LunaEngine:
         )
         if multi_file_match:
             raw_targets = multi_file_match.group(1)
-            open_in_vscode = "vscode" in lowered
+            open_in_vscode = self._mentions_vscode(normalized)
             parts = [part.strip().strip('"').strip("'") for part in re.split(r",|;", raw_targets) if part.strip()]
             if not parts:
                 return "Luna: Chybi seznam souboru."
@@ -1433,7 +1550,7 @@ class LunaEngine:
         if rich_file_match:
             target = self._resolve_creation_target(rich_file_match.group(1))
             content = rich_file_match.group(2)
-            open_in_vscode = "vscode" in lowered
+            open_in_vscode = self._mentions_vscode(normalized)
 
             def create_rich_file() -> str:
                 message = self.desktop_actions.create_file(target, content)
@@ -1454,7 +1571,7 @@ class LunaEngine:
             folder_names = self._parse_folder_names(raw_targets)
             if not folder_names:
                 folder_names = ["src", "docs", "tests", "scripts"]
-            open_in_vscode = "vscode" in lowered or "vs code" in lowered
+            open_in_vscode = self._mentions_vscode(normalized)
 
             def create_many_folders() -> str:
                 workspace = self._default_action_root()
@@ -1481,7 +1598,7 @@ class LunaEngine:
             if not match:
                 continue
             raw_target = match.group(1)
-            open_in_vscode = "vscode" in raw_target.lower()
+            open_in_vscode = self._mentions_vscode(raw_target)
             if open_in_vscode:
                 raw_target = re.sub(r'(?:a )?otevri ve vscode|(?:and )?open in vscode', '', raw_target, flags=re.IGNORECASE).strip()
             target = self._resolve_creation_target(raw_target)
@@ -1501,6 +1618,18 @@ class LunaEngine:
             if target is not None:
                 return self._guarded_action("path_open", f"open path {target}", lambda: self.desktop_actions.open_path(target))
             return "Luna: Tu cestu jsem v pocitaci nenasla."
+
+        wants_open = any(token in lowered for token in ["otevri", "otev?i", "open", "spust", "spus?"])
+        wants_web = any(token in lowered for token in [" web", "web ", "webu", "website", "stranku", "stranka"])
+        if wants_open and wants_web and self._mentions_vscode(normalized):
+            web_target = self._find_named_target("web", prefer_directory=True) or self._find_recent_workspace_target("web", prefer_directory=True)
+            if web_target is None:
+                return "Luna: Slozku web jsem v projektu nenasla."
+
+            def open_web_in_vscode() -> str:
+                return self.desktop_actions.open_web_folder_in_vscode(self.user_settings.data.vscode_path, web_target)
+
+            return self._guarded_action("app_launch", f"open web folder in VS Code {web_target}", open_web_in_vscode)
 
         command_patterns = [
             (r'(?:otevri|otev\?i|open) (?:soubor|file) (.+)$', False),
@@ -1548,7 +1677,7 @@ class LunaEngine:
             return None
 
         app_aliases = {
-            "vscode": ["vscode", "vs code", "visual studio code", "code.exe"],
+            "vscode": ["vscode", "vs code", "vscodu", "vs codu", "visual studio code", "code.exe"],
             "blender": ["blender"],
             "unreal": ["unreal", "unreal engine", "unreal engine 5", "ue5"],
             "unity": ["unity"],
@@ -1814,6 +1943,12 @@ class LunaEngine:
         internet_result = self._handle_internet_command(cleaned_input)
         if internet_result is not None:
             return internet_result
+
+        screen_share_help_result = self._handle_screen_share_help_command(cleaned_input)
+        if screen_share_help_result is not None:
+            self.memory_coordinator.remember_user_input(cleaned_input, "support")
+            self.memory_coordinator.save_exchange(cleaned_input, screen_share_help_result)
+            return screen_share_help_result
 
         observation_result = self._handle_observation_command(cleaned_input)
         if observation_result is not None:

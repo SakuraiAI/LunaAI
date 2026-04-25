@@ -9,6 +9,9 @@ contextBridge.exposeInMainWorld('lunaDesktop', {
   app: {
     getMeta: () => ipcRenderer.invoke('app:get-meta'),
   },
+  shell: {
+    openExternal: (url) => ipcRenderer.invoke('shell:open-external', url),
+  },
   files: {
     readAsDataUrl: (filePath) => ipcRenderer.invoke('files:read-as-data-url', filePath),
     writeTempDataUrl: (payload) => ipcRenderer.invoke('files:write-temp-data-url', payload),

@@ -929,6 +929,18 @@ button:hover { transform: translateY(-1px); }
   text-transform: uppercase;
 }
 .message-bubble p { margin: 0; line-height: 1.65; color: var(--text); white-space: pre-wrap; }
+.message-link {
+  color: #f4f4f4;
+  font-weight: 800;
+  text-decoration: underline;
+  text-decoration-color: rgba(255, 255, 255, 0.42);
+  text-underline-offset: 4px;
+  overflow-wrap: anywhere;
+}
+.message-link:hover {
+  color: #ffffff;
+  text-decoration-color: rgba(255, 255, 255, 0.9);
+}
 .screen-share-panel {
   position: sticky;
   top: 18px;
