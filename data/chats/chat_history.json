@@ -955,6 +955,66 @@
         "role": "assistant",
         "content": "Instagram – https://www.instagram.com/ 🙂",
         "author": "Luna"
+      },
+      {
+        "role": "user",
+        "content": "[object Object]",
+        "author": "You"
+      },
+      {
+        "role": "assistant",
+        "content": "Vypadá to, že se místo konkrétních dat zobrazil jen řetězec `[object Object]`. Můžeš upřesnit, co konkrétně potřebuješ získat nebo zobrazit? 🙂",
+        "author": "Luna"
+      },
+      {
+        "role": "user",
+        "content": "Курва",
+        "author": "You"
+      },
+      {
+        "role": "assistant",
+        "content": "Rozumím, že něco nefunguje. Co konkrétně potřebuješ vyřešit? 🙂",
+        "author": "Luna"
+      },
+      {
+        "role": "user",
+        "content": "What are you talking about man.",
+        "author": "You"
+      },
+      {
+        "role": "assistant",
+        "content": "I was checking what you need help with—your last messages weren’t clear enough for me to act on. Let me know what you’d like me to do. 🙂",
+        "author": "Luna"
+      },
+      {
+        "role": "user",
+        "content": "Разумичный",
+        "author": "You"
+      },
+      {
+        "role": "assistant",
+        "content": "Сейчас мы работаем над проектом **Build A Local** – локальной средой для разработки с AI‑поддержкой.\n\n**Текущий статус**\n- Первый milestone (зафиксировать цель) – выполнен.\n- Картирование пути выполнения – в процессе (создан документ `execution_plan.md`, но при открытии возникла ошибка доступа).\n- Подготовка рабочей среды – ещё не начата.\n- Создание первой рабочей части – ожидает подготовки среды.\n\n**Что делаем дальше**\n1. Разрешить доступ к файлу `execution_plan.md` и открыть его, чтобы уточнить шаги.\n2. Подготовить чистый шаблон рабочей области (папки, зависимости, базовый `README`).\n3. Запустить самый простой рабочий пример – «Hello World» в выбранном редакторе/контейнере.\n\nЕсли нужно, могу сразу попробовать исправить права доступа к документу или создать новую структуру проекта. Дай знать, какой шаг приоритетный. 🙂",
+        "author": "Luna"
+      },
+      {
+        "role": "user",
+        "content": "Stop okay",
+        "author": "You"
+      },
+      {
+        "role": "assistant",
+        "content": "Understood—stopping here. Let me know if you need anything else. 🙂",
+        "author": "Luna"
+      },
+      {
+        "role": "user",
+        "content": "You Visual code you share desktop.",
+        "author": "You"
+      },
+      {
+        "role": "assistant",
+        "content": "Luna: Tady nejde o Zoom, Teams ani OBS. V LunaAI se používá vestavěný Desktop share. 👀\n\n1. Klikni na `+` vedle pole pro zprávu.\n2. Vyber `Desktop share`.\n3. Zvol monitor nebo konkrétní okno.\n4. Vpravo se má ukázat živý náhled se štítkem `LIVE`.\n5. Od té chvíle Luna a Xeno dostávají průběžně obnovované framy jako vizuální kontext.\n\nKdyž se náhled neukáže, problém je v Electron screen-capture vrstvě, ne v nastavení Windows videohovoru.",
+        "author": "Luna"
       }
     ],
     "324043127de3": [

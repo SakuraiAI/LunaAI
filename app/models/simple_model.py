@@ -2,45 +2,27 @@ from app.models.base_model import BaseModel
 
 
 class SimpleModel(BaseModel):
-    def generate(self, prompt: str | list[dict[str, str]]) -> str:
-        if isinstance(prompt, list):
-            last_user_messages = [msg["content"] for msg in prompt if msg["role"] == "user"]
-            text = last_user_messages[-1].lower() if last_user_messages else ""
+    def generate(self, prompt: str, context: str = "") -> str:
+        if "User:" in prompt:
+            last_input = prompt.split("User:")[-1].strip().lower()
+        elif " User:" in prompt:
+            last_input = prompt.split(" User:")[-1].strip().lower()
         else:
-            text = prompt.lower()
-            if "User:" in prompt:
-                text = prompt.split("User:")[-1].strip().lower()
+            last_input = prompt.strip().lower()
 
-        if any(
-            phrase in text
-            for phrase in [
-                "sdílení obrazovky",
-                "sdileni obrazovky",
-                "sdílet obrazovku",
-                "sdilet obrazovku",
-                "share screen",
-                "desktop share",
-                "shere desktop",
-                "share deskop",
-                "shere deskop",
-                "deskop share",
-            ]
-        ):
-            return (
-                "Luna: V LunaAI nepoužívej Zoom ani OBS. Otevři v aplikaci tlačítko +, zvol Desktop share, "
-                "vyber obrazovku nebo okno a nech běžet živý náhled. Luna a Xeno pak čtou průběžně obnovované framy jako vizuální kontext. 👀"
-            )
+        if "hello" in last_input or "hi" in last_input:
+            return "Luna: Hello, I am Luna. I am ready to help you with projects and ideas."
 
-        if any(greeting in text for greeting in ["ahoj", "cau", "cao", "dobry den", "hello", "hi"]):
-            return "Luna: Jsem tady 🙂 Co potřebuješ?"
+        if "what can you do" in last_input or "what do you do" in last_input:
+            return "Luna: Right now I can handle simple chat, keep basic conversation context, and serve as a starting point for your local AI platform."
 
-        if any(phrase in text for phrase in ["jak se mas", "jak se máš", "how are you"]):
-            return "Luna: Jsem připravená pokračovat 🙂 Co je teď potřeba?"
+        if "project" in last_input:
+            return "Luna: I can help you with project planning, structure, architecture, and further development."
 
-        if any(phrase in text for phrase in ["what can", "co umis", "co umíš", "co dokaz", "co dokáž"]):
-            return "Luna: Nejvíc pomůžu s projektem, dalšími kroky, kódem, akcemi v PC a čtením obrazovky přes Desktop share ✨"
+        if "stop" in last_input:
+            return "Luna: Understood. I will try to respond more precisely to your last message."
 
-        if "project" in text or "projekt" in text:
-            return "Luna: Můžeme ho rozdělit na kroky, srovnat strukturu nebo rovnou udělat další praktický tah 🚀"
+        if "end" in last_input or "quit" in last_input:
+            return "Luna: Understood."
 
-        return "Luna: Rozumím. Pojďme to vzít prakticky a po pořádku 🙂"
+        return "Luna: I understand. I am still in an early version, but we can already communicate together."

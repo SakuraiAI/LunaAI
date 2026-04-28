@@ -32,6 +32,9 @@ export default function ChatInput({
   attachment,
   onClearAttachment,
   screenShare,
+  micRecording = false,
+  voiceLoopEnabled = false,
+  voiceSpeaking = false,
   centered = false,
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
@@ -124,6 +127,9 @@ export default function ChatInput({
             <button type="button" onClick={() => { onAction('share-screen'); setMenuOpen(false); }}>
               {screenShare?.active ? 'Restart desktop share' : 'Share desktop'}
             </button>
+            <button type="button" onClick={() => { onAction('speak'); setMenuOpen(false); }}>
+              Read aloud once
+            </button>
             <button type="button" onClick={handleGenerateImage}>Generate image</button>
           </div>
         )}
@@ -148,13 +154,25 @@ export default function ChatInput({
           rows={1}
         />
       </div>
-      <button className="input-icon-button" type="button" onClick={() => onAction('mic')} aria-label="Microphone">
+      <button
+        className={`input-icon-button ${micRecording ? 'is-recording' : ''}`}
+        type="button"
+        onClick={() => onAction('mic')}
+        aria-label={micRecording ? 'Stop recording' : 'Microphone'}
+        title={micRecording ? 'Stop recording and transcribe' : 'Record voice message'}
+      >
         <MicIcon />
       </button>
-      <button className="input-icon-button input-icon-button-solid" type="button" onClick={() => onAction('voice')} aria-label="Voice mode">
+      <button
+        className={`input-icon-button input-icon-button-solid ${voiceSpeaking ? 'is-speaking' : ''} ${voiceLoopEnabled ? 'is-voice-loop' : ''}`}
+        type="button"
+        onClick={() => onAction('voice')}
+        aria-label={voiceLoopEnabled ? 'Disable voice loop' : 'Enable voice loop'}
+        title={voiceLoopEnabled ? 'Voice loop is active' : 'Enable voice loop'}
+      >
         <VoiceIcon />
       </button>
-      <button className="send-button" type="button" onClick={onSend}>Send</button>
+      <button className="send-button" type="button" onClick={() => onSend()}>Send</button>
     </div>
   );
 }

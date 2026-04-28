@@ -10,6 +10,7 @@ import NotificationsPanel from './components/NotificationsPanel';
 import ProjectModal from './components/ProjectModal';
 import DesktopShareOverlay from './components/DesktopShareOverlay';
 import ScreenShareSourcePicker from './components/ScreenShareSourcePicker';
+import VoiceSessionOverlay from './components/VoiceSessionOverlay';
 import GalleryPage from './pages/GalleryPage';
 import SectionPage from './pages/SectionPage';
 import SettingsPage from './pages/SettingsPage';
@@ -172,6 +173,84 @@ async function readLocalPreviewDataUrl(filePath) {
   if (!targetPath || !api?.readAsDataUrl) return '';
   const result = await api.readAsDataUrl(targetPath).catch(() => null);
   return result?.ok && result?.dataUrl ? String(result.dataUrl) : '';
+}
+
+function mergeFloat32Chunks(chunks) {
+  const totalLength = chunks.reduce((sum, chunk) => sum + chunk.length, 0);
+  const merged = new Float32Array(totalLength);
+  let offset = 0;
+  chunks.forEach((chunk) => {
+    merged.set(chunk, offset);
+    offset += chunk.length;
+  });
+  return merged;
+}
+
+function downsampleFloat32Buffer(buffer, inputSampleRate, outputSampleRate = 16000) {
+  if (inputSampleRate === outputSampleRate) return buffer;
+  const ratio = inputSampleRate / outputSampleRate;
+  const nextLength = Math.round(buffer.length / ratio);
+  const result = new Float32Array(nextLength);
+  let offsetResult = 0;
+  let offsetBuffer = 0;
+
+  while (offsetResult < result.length) {
+    const nextOffsetBuffer = Math.round((offsetResult + 1) * ratio);
+    let sum = 0;
+    let count = 0;
+    for (let index = offsetBuffer; index < nextOffsetBuffer && index < buffer.length; index += 1) {
+      sum += buffer[index];
+      count += 1;
+    }
+    result[offsetResult] = count ? sum / count : 0;
+    offsetResult += 1;
+    offsetBuffer = nextOffsetBuffer;
+  }
+
+  return result;
+}
+
+function encodePcm16Wav(samples, sampleRate = 16000) {
+  const bytesPerSample = 2;
+  const buffer = new ArrayBuffer(44 + samples.length * bytesPerSample);
+  const view = new DataView(buffer);
+
+  const writeString = (offset, value) => {
+    for (let index = 0; index < value.length; index += 1) {
+      view.setUint8(offset + index, value.charCodeAt(index));
+    }
+  };
+
+  writeString(0, 'RIFF');
+  view.setUint32(4, 36 + samples.length * bytesPerSample, true);
+  writeString(8, 'WAVE');
+  writeString(12, 'fmt ');
+  view.setUint32(16, 16, true);
+  view.setUint16(20, 1, true);
+  view.setUint16(22, 1, true);
+  view.setUint32(24, sampleRate, true);
+  view.setUint32(28, sampleRate * bytesPerSample, true);
+  view.setUint16(32, bytesPerSample, true);
+  view.setUint16(34, 16, true);
+  writeString(36, 'data');
+  view.setUint32(40, samples.length * bytesPerSample, true);
+
+  let offset = 44;
+  for (let index = 0; index < samples.length; index += 1, offset += 2) {
+    const sample = Math.max(-1, Math.min(1, samples[index]));
+    view.setInt16(offset, sample < 0 ? sample * 0x8000 : sample * 0x7fff, true);
+  }
+
+  return new Blob([view], { type: 'audio/wav' });
+}
+
+function blobToDataUrl(blob) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ''));
+    reader.onerror = () => reject(reader.error);
+    reader.readAsDataURL(blob);
+  });
 }
 
 function shouldConsultXeno(text) {
@@ -394,9 +473,13 @@ export default function App() {
   const [projectType, setProjectType] = useState('investing');
   const [chatBusy, setChatBusy] = useState(false);
   const [eyesBusy, setEyesBusy] = useState(false);
+  const [micRecording, setMicRecording] = useState(false);
+  const [speechPlaying, setSpeechPlaying] = useState(false);
+  const [voiceLoopEnabled, setVoiceLoopEnabled] = useState(false);
   const [thinkingState, setThinkingState] = useState(idleThinkingState);
   const [revealingMessage, setRevealingMessage] = useState(null);
   const [pendingAction, setPendingAction] = useState({ active: false, title: '' });
+  const [actionEnginePending, setActionEnginePending] = useState({ active: false, title: '' });
   const [shareAutomation, setShareAutomation] = useState(defaultShareAutomationState);
   const [screenSharePicker, setScreenSharePicker] = useState(defaultScreenSharePickerState);
   const messages = currentChatId ? chatMessages[currentChatId] || [] : [];
@@ -415,6 +498,9 @@ export default function App() {
   const screenShareStateRef = useRef(screenShare);
   const shareAutomationRef = useRef(shareAutomation);
   const messagesRef = useRef(messages);
+  const micSessionRef = useRef(null);
+  const speechPlaybackRef = useRef(null);
+  const voiceLoopRef = useRef(false);
   const taskPlanner = useMemo(() => createTaskPlanner(), []);
 
   const profileName = signedInAs ? signedInAs.split('@')[0] : 'Sakurai Haise';
@@ -457,6 +543,10 @@ export default function App() {
   useEffect(() => {
     messagesRef.current = messages;
   }, [messages]);
+
+  useEffect(() => {
+    voiceLoopRef.current = voiceLoopEnabled;
+  }, [voiceLoopEnabled]);
 
   useEffect(() => () => {
     if (screenShareIntervalRef.current) {
@@ -661,6 +751,25 @@ export default function App() {
     return true;
   }
 
+  function applyActionEnginePendingState(result) {
+    const pending = result?.pendingAction || null;
+    if (!pending?.active) {
+      setActionEnginePending({ active: false, title: '' });
+      return false;
+    }
+
+    const action = pending.action || {};
+    const title = pending.title
+      || `${action.type || 'Action Engine'}${action.target ? ` -> ${action.target}` : ''}`;
+    setActionEnginePending({
+      active: true,
+      title,
+      source: 'action-engine',
+      message: pending.message || '',
+    });
+    return true;
+  }
+
   function startAssistantReveal({ chatId, author = 'Luna', fullText, commit }) {
     clearRevealTimer();
     const normalizedText = String(fullText || '').trim();
@@ -691,6 +800,9 @@ export default function App() {
         revealActiveRef.current = false;
         setRevealingMessage(null);
         commit?.();
+        if (voiceLoopRef.current) {
+          handleTextToSpeech(normalizedText);
+        }
         return;
       }
 
@@ -888,6 +1000,7 @@ export default function App() {
     }
 
     if (executionResult.confirmationRequest) {
+      applyActionEnginePendingState(executionResult);
       setShareAutomation((current) => ({
         ...current,
         confirmationRequest: executionResult.confirmationRequest,
@@ -897,6 +1010,7 @@ export default function App() {
       return;
     }
 
+    applyActionEnginePendingState(executionResult);
     setShareAutomation((current) => ({
       ...current,
       confirmationRequest: null,
@@ -1307,6 +1421,25 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    const api = window.lunaDesktop?.actionEngine;
+    if (!api?.getPending) return;
+
+    let cancelled = false;
+
+    async function loadActionEnginePending() {
+      const result = await api.getPending().catch(() => null);
+      if (!cancelled && result?.ok) {
+        applyActionEnginePendingState(result);
+      }
+    }
+
+    loadActionEnginePending();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
     const api = window.lunaDesktop?.luna;
     if (!api?.observeDesktop || page !== 'eyes' || !observeModeEnabled) return undefined;
 
@@ -1400,8 +1533,9 @@ export default function App() {
     return chatId;
   }
 
-  async function handleSend() {
-    const text = normalizeTransportText(composer).trim();
+  async function handleSend(overrideText = '') {
+    const safeOverrideText = typeof overrideText === 'string' ? overrideText : '';
+    const text = normalizeTransportText(safeOverrideText || composer).trim();
     if ((!text && !attachment?.name) || chatBusy) return;
 
     const api = window.lunaDesktop?.luna;
@@ -1592,15 +1726,43 @@ export default function App() {
   }
 
   async function handlePendingActionDecision(kind) {
-    const api = window.lunaDesktop?.luna;
-    if (!api) return;
+    const lunaApi = window.lunaDesktop?.luna;
+    const actionApi = window.lunaDesktop?.actionEngine;
+
+    if (!pendingAction?.active && actionEnginePending?.active && actionApi) {
+      setChatBusy(true);
+      setThinkingState({ visible: true, lunaActive: true, xenoActive: true });
+      try {
+        const result = kind === 'confirm'
+          ? await actionApi.confirmPending()
+          : await actionApi.cancelPending();
+        applyActionEnginePendingState(result);
+        setShareAutomation((current) => ({
+          ...current,
+          confirmationRequest: null,
+          lastActionStatus: result?.status || (kind === 'confirm' ? 'executed' : 'cancelled'),
+          lastActionMessage: result?.message || (kind === 'confirm' ? 'Action Engine request executed.' : 'Action Engine request cancelled.'),
+        }));
+        setStatus(result?.message || (kind === 'confirm' ? 'Action Engine request executed.' : 'Action Engine request cancelled.'));
+      } catch {
+        setStatus(kind === 'confirm' ? 'Action Engine confirmation failed.' : 'Action Engine cancellation failed.');
+      } finally {
+        setChatBusy(false);
+        if (!revealActiveRef.current) {
+          setThinkingState((current) => (current.visible ? idleThinkingState : current));
+        }
+      }
+      return;
+    }
+
+    if (!lunaApi) return;
 
     setChatBusy(true);
     setThinkingState({ visible: true, lunaActive: true, xenoActive: false });
     try {
       const result = kind === 'confirm'
-        ? await api.confirmPendingAction()
-        : await api.cancelPendingAction();
+        ? await lunaApi.confirmPendingAction()
+        : await lunaApi.cancelPendingAction();
       const handled = handleBackendResponseResult(result, kind === 'confirm' ? 'Akce byla potvrzena.' : 'Akce byla zrusena.');
       if (kind === 'cancel' && handled) {
         const backendMessages = Array.isArray(result?.messages) ? result.messages : [];
@@ -1899,6 +2061,254 @@ export default function App() {
     setStatus(`Signed in as ${cleaned}`);
   }
 
+  async function startMicrophoneCapture() {
+    const fileApi = window.lunaDesktop?.files;
+    const lunaApi = window.lunaDesktop?.luna;
+    if (!navigator.mediaDevices?.getUserMedia || !fileApi?.writeTempDataUrl || !lunaApi?.transcribeAudio) {
+      setStatus('Microphone transcription works only inside the Electron shell with backend STT connected.');
+      return;
+    }
+
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+      const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+      const audioContext = new AudioContextClass();
+      const source = audioContext.createMediaStreamSource(stream);
+      const processor = audioContext.createScriptProcessor(4096, 1, 1);
+      const silentGain = audioContext.createGain();
+      const chunks = [];
+
+      silentGain.gain.value = 0;
+      processor.onaudioprocess = (event) => {
+        const input = event.inputBuffer.getChannelData(0);
+        chunks.push(new Float32Array(input));
+        if (!voiceLoopRef.current || micSessionRef.current?.autoStopping) return;
+
+        let sum = 0;
+        for (let index = 0; index < input.length; index += 1) {
+          sum += input[index] * input[index];
+        }
+        const rms = Math.sqrt(sum / Math.max(1, input.length));
+        const session = micSessionRef.current;
+        if (!session) return;
+        const now = Date.now();
+        if (rms > 0.018) {
+          session.heardSpeech = true;
+          session.lastVoiceAt = now;
+        }
+        if (session.heardSpeech && now - session.lastVoiceAt > 1100) {
+          session.autoStopping = true;
+          window.setTimeout(() => stopMicrophoneCapture(), 0);
+        }
+      };
+
+      source.connect(processor);
+      processor.connect(silentGain);
+      silentGain.connect(audioContext.destination);
+
+      micSessionRef.current = {
+        stream,
+        audioContext,
+        source,
+        processor,
+        silentGain,
+        chunks,
+        sampleRate: audioContext.sampleRate,
+        heardSpeech: false,
+        lastVoiceAt: Date.now(),
+        autoStopping: false,
+      };
+      setMicRecording(true);
+      setStatus('Listening... click the microphone again to transcribe.');
+    } catch (error) {
+      setMicRecording(false);
+      micSessionRef.current = null;
+      setStatus(`Microphone could not start: ${String(error?.message || error)}`);
+    }
+  }
+
+  async function stopMicrophoneCapture() {
+    const session = micSessionRef.current;
+    micSessionRef.current = null;
+    setMicRecording(false);
+    if (!session) return;
+
+    try {
+      session.processor.disconnect();
+      session.source.disconnect();
+      session.silentGain.disconnect();
+    } catch {
+      // Best effort cleanup.
+    }
+    session.stream.getTracks().forEach((track) => track.stop());
+    await session.audioContext.close().catch(() => {});
+
+    if (!session.chunks.length) {
+      setStatus('No microphone audio was captured.');
+      return;
+    }
+
+    try {
+      setStatus('Transcribing microphone audio...');
+      const merged = mergeFloat32Chunks(session.chunks);
+      const downsampled = downsampleFloat32Buffer(merged, session.sampleRate, 16000);
+      const wavBlob = encodePcm16Wav(downsampled, 16000);
+      const dataUrl = await blobToDataUrl(wavBlob);
+      const fileResult = await window.lunaDesktop.files.writeTempDataUrl({
+        dataUrl,
+        extension: 'wav',
+      });
+
+      if (!fileResult?.ok || !fileResult?.path) {
+        setStatus(fileResult?.message || 'Microphone audio could not be saved.');
+        return;
+      }
+
+      const result = await window.lunaDesktop.luna.transcribeAudio({
+        filePath: fileResult.path,
+        language: 'cs-CZ',
+      });
+      const transcript = normalizeTransportText(result?.transcript || '').trim();
+      if (!result?.ok || !transcript) {
+        setStatus(result?.message || 'Speech transcription did not return text.');
+        return;
+      }
+
+      if (voiceLoopRef.current) {
+        setComposer('');
+        setStatus('Voice loop heard you. Sending it to Luna/Xeno...');
+        await handleSend(transcript);
+        return;
+      }
+
+      setComposer((current) => {
+        const prefix = current.trim() ? `${current.trim()} ` : '';
+        return `${prefix}${transcript}`;
+      });
+      setStatus('Speech transcription inserted into the message box.');
+    } catch (error) {
+      setStatus(`Speech transcription failed: ${String(error?.message || error)}`);
+    }
+  }
+
+  function toggleMicrophoneCapture() {
+    if (micRecording) {
+      stopMicrophoneCapture();
+    } else {
+      startMicrophoneCapture();
+    }
+  }
+
+  function stopSpeechPlayback() {
+    const currentAudio = speechPlaybackRef.current;
+    if (currentAudio) {
+      currentAudio.pause();
+      currentAudio.currentTime = 0;
+      speechPlaybackRef.current = null;
+    }
+    setSpeechPlaying(false);
+  }
+
+  function closeVoiceSession() {
+    voiceLoopRef.current = false;
+    setVoiceLoopEnabled(false);
+    if (micSessionRef.current) {
+      stopMicrophoneCapture();
+    }
+    stopSpeechPlayback();
+    setStatus('Voice session closed.');
+  }
+
+  async function playGeneratedSpeech(audioPath) {
+    const fileApi = window.lunaDesktop?.files;
+    if (!fileApi?.readAsDataUrl) {
+      setStatus('Audio playback works only inside the Electron desktop shell.');
+      return;
+    }
+
+    const audioResult = await fileApi.readAsDataUrl(audioPath);
+    if (!audioResult?.ok || !audioResult?.dataUrl) {
+      setStatus(audioResult?.message || 'Generated speech audio could not be loaded.');
+      return;
+    }
+
+    stopSpeechPlayback();
+    const audio = new Audio(audioResult.dataUrl);
+    speechPlaybackRef.current = audio;
+    setSpeechPlaying(true);
+    audio.onended = () => {
+      if (speechPlaybackRef.current === audio) {
+        speechPlaybackRef.current = null;
+        setSpeechPlaying(false);
+      }
+      if (voiceLoopRef.current) {
+        window.setTimeout(() => {
+          if (voiceLoopRef.current && !micSessionRef.current) {
+            startMicrophoneCapture();
+          }
+        }, 450);
+      }
+    };
+    audio.onerror = () => {
+      if (speechPlaybackRef.current === audio) {
+        speechPlaybackRef.current = null;
+        setSpeechPlaying(false);
+      }
+      setStatus('Generated speech audio could not be played.');
+    };
+    await audio.play();
+  }
+
+  function getTextForSpeech(overrideText = '') {
+    const typedText = normalizeTransportText(overrideText || composer).trim();
+    if (typedText) return typedText;
+
+    for (let index = messages.length - 1; index >= 0; index -= 1) {
+      const message = messages[index];
+      if (message?.role !== 'user' && String(message?.content || '').trim()) {
+        return normalizeTransportText(message.content).trim();
+      }
+    }
+    return '';
+  }
+
+  async function handleTextToSpeech(overrideText = '') {
+    if (speechPlaying) {
+      stopSpeechPlayback();
+      setStatus('Speech playback stopped.');
+      return;
+    }
+
+    const lunaApi = window.lunaDesktop?.luna;
+    if (!lunaApi?.synthesizeSpeech) {
+      setStatus('Text-to-speech works only inside the Electron shell with NVIDIA TTS connected.');
+      return;
+    }
+
+    const text = getTextForSpeech(overrideText);
+    if (!text) {
+      setStatus('Write text first, or keep a Luna/Xeno answer in the chat to read aloud.');
+      return;
+    }
+
+    try {
+      setStatus('Generating voice with NVIDIA Magpie...');
+      const result = await lunaApi.synthesizeSpeech({
+        text,
+        language: 'en-US',
+      });
+      if (!result?.ok || !result?.audioPath) {
+        setStatus(result?.message || 'Text-to-speech did not return audio.');
+        return;
+      }
+      await playGeneratedSpeech(result.audioPath);
+      setStatus('Playing generated voice.');
+    } catch (error) {
+      setSpeechPlaying(false);
+      setStatus(`Text-to-speech failed: ${String(error?.message || error)}`);
+    }
+  }
+
   function handleInputAction(action, payload) {
     if (action === 'file' && payload) {
       const isVisualAttachment = Boolean(
@@ -1936,10 +2346,36 @@ export default function App() {
       setStatus('Image generation prompt loaded into the composer.');
       return;
     }
+    if (action === 'mic') {
+      toggleMicrophoneCapture();
+      return;
+    }
+    if (action === 'voice') {
+      setVoiceLoopEnabled((current) => {
+        const next = !current;
+        voiceLoopRef.current = next;
+        if (next && !micSessionRef.current) {
+          window.setTimeout(() => startMicrophoneCapture(), 0);
+        }
+        if (!next && micSessionRef.current) {
+          window.setTimeout(() => stopMicrophoneCapture(), 0);
+        }
+        if (!next) {
+          stopSpeechPlayback();
+        }
+        setStatus(next
+          ? 'Voice loop enabled: Mic will send your speech and Luna/Xeno will answer aloud.'
+          : 'Voice loop disabled. Voice button now reads text aloud manually.');
+        return next;
+      });
+      return;
+    }
+    if (action === 'speak') {
+      handleTextToSpeech();
+      return;
+    }
     const messagesByAction = {
       menu: 'Quick action surface is ready for file and image workflows.',
-      mic: 'Microphone interaction is reserved for the voice layer.',
-      voice: 'Voice mode shell is prepared for future conversational loops.',
     };
     setStatus(messagesByAction[action] || 'Action prepared.');
   }
@@ -2079,6 +2515,7 @@ export default function App() {
   function renderMain() {
     if (page === 'chat') {
       const isEmptyChat = messages.length === 0;
+      const combinedPendingAction = pendingAction?.active ? pendingAction : actionEnginePending;
 
       return (
         <div className={`chat-page ${isEmptyChat ? 'is-empty' : ''}`}>
@@ -2087,7 +2524,7 @@ export default function App() {
             chatId={currentChatId}
             thinkingState={thinkingState}
             revealingMessage={revealingMessage?.chatId === currentChatId ? revealingMessage : null}
-            pendingAction={pendingAction}
+            pendingAction={combinedPendingAction}
             onConfirmPendingAction={() => handlePendingActionDecision('confirm')}
             onCancelPendingAction={() => handlePendingActionDecision('cancel')}
             screenShare={screenShare}
@@ -2112,6 +2549,9 @@ export default function App() {
             }}
             screenShare={screenShare}
             onStopScreenShare={() => stopScreenShare({ message: 'Desktop sharing was stopped.' })}
+            micRecording={micRecording}
+            voiceLoopEnabled={voiceLoopEnabled}
+            voiceSpeaking={speechPlaying}
             centered={isEmptyChat}
           />
         </div>
@@ -2254,6 +2694,14 @@ export default function App() {
       <DesktopShareOverlay
         screenShare={screenShare}
         onStopScreenShare={() => stopScreenShare({ message: 'Desktop sharing was stopped.' })}
+      />
+      <VoiceSessionOverlay
+        visible={voiceLoopEnabled || micRecording || speechPlaying}
+        listening={micRecording}
+        speaking={speechPlaying}
+        thinking={chatBusy || thinkingState.visible}
+        onToggleListen={toggleMicrophoneCapture}
+        onClose={closeVoiceSession}
       />
     </>
   );

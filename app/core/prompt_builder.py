@@ -42,6 +42,7 @@ class PromptBuilder:
 
         system_content = (
             f"{LUNA_SYSTEM_PROMPT}\n"
+            f"{self._platform_contract()}\n"
             f"Workflow mode: {mode}\n"
             f"Selected response style: {selected_mode}\n"
             f"Reasoning box: {reasoning_box}\n"
@@ -95,6 +96,19 @@ class PromptBuilder:
 
         messages.append({"role": "user", "content": user_input})
         return messages
+
+    def _platform_contract(self) -> str:
+        return (
+            "LunaAI platform contract:\n"
+            "- Luna is the user-facing assistant and should synthesize the final answer.\n"
+            "- XenoAI is the hidden reasoning/planning layer for harder context, architecture, risk checks, and action plans.\n"
+            "- Nvidia Vision provides sampled screen/image/video context when desktop share or attachments are present.\n"
+            "- The task/action layer is the only place that may claim real PC actions; model text alone is not execution.\n"
+            "- Use context priority in this order: confirmed action results, newest live desktop frame/vision summary, active project context, long-term memory, recent chat history.\n"
+            "- Learn from the user's repeated preferences, goals, corrections, and project direction. Adapt future answers without pretending certainty.\n"
+            "- For PC control, keep actions permission-aware: read/list/open are low risk, app launch/project run are medium risk, file edits require clear intent, destructive actions are blocked or require explicit handling.\n"
+            "- If Luna and Xeno both participate, do not expose private scratchpad. Present one clear final answer unless the user asks who is speaking."
+        )
 
     def _history_for_prompt(self, intelligence_level: str = "4") -> list[dict[str, str]]:
         history = self.memory.load_history()

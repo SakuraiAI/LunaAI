@@ -1,13 +1,16 @@
 from __future__ import annotations
 
 import os
+import ctypes
 import json
 import re
 import subprocess
 import sys
+import time
 from datetime import datetime
 from dataclasses import asdict, dataclass
 from pathlib import Path
+from urllib.parse import quote_plus
 
 from app.core.user_settings import UserWorkspaceSettings
 
@@ -63,6 +66,37 @@ class DesktopActionTool:
         "run_project": {"category": "project_run", "label": "Run project"},
         "refresh_review_notes": {"category": "file_change", "label": "Refresh review notes"},
         "observe_desktop_state": {"category": "observe", "label": "Observe desktop state"},
+        "type_text": {"category": "system_input", "label": "Type text into active window"},
+        "press_shortcut": {"category": "system_input", "label": "Press keyboard shortcut"},
+        "mouse_click": {"category": "system_input", "label": "Click screen coordinates"},
+    }
+
+    KEYBOARD_KEY_CODES = {
+        "backspace": 0x08,
+        "tab": 0x09,
+        "enter": 0x0D,
+        "return": 0x0D,
+        "shift": 0x10,
+        "ctrl": 0x11,
+        "control": 0x11,
+        "alt": 0x12,
+        "pause": 0x13,
+        "capslock": 0x14,
+        "escape": 0x1B,
+        "esc": 0x1B,
+        "space": 0x20,
+        "pageup": 0x21,
+        "pagedown": 0x22,
+        "end": 0x23,
+        "home": 0x24,
+        "left": 0x25,
+        "up": 0x26,
+        "right": 0x27,
+        "down": 0x28,
+        "insert": 0x2D,
+        "delete": 0x2E,
+        "win": 0x5B,
+        "windows": 0x5B,
     }
 
     def __init__(self, workspace_root: Path | None = None) -> None:
@@ -89,6 +123,58 @@ class DesktopActionTool:
             action_key=action_key,
             workspace=workspace,
         ).to_dict()
+
+    def _require_windows_input(self) -> None:
+        if os.name != "nt":
+            raise OSError("System input automation is currently supported only on Windows.")
+
+    def _virtual_key_for(self, key_name: str) -> int:
+        cleaned = str(key_name or "").strip().lower().replace(" ", "")
+        if not cleaned:
+            raise OSError("Missing key name.")
+        if cleaned in self.KEYBOARD_KEY_CODES:
+            return self.KEYBOARD_KEY_CODES[cleaned]
+        if re.fullmatch(r"f(?:[1-9]|1[0-2])", cleaned):
+            return 0x70 + int(cleaned[1:]) - 1
+        if len(cleaned) == 1 and cleaned.isalnum():
+            return ord(cleaned.upper())
+        raise OSError(f"Unsupported key: {key_name}")
+
+    def _key_event(self, virtual_key: int, *, key_up: bool = False) -> None:
+        self._require_windows_input()
+        flags = 0x0002 if key_up else 0
+        ctypes.windll.user32.keybd_event(virtual_key, 0, flags, 0)
+
+    def _unicode_key_event(self, char: str, *, key_up: bool = False) -> None:
+        self._require_windows_input()
+        if not char:
+            return
+        codepoint = ord(char)
+        if codepoint > 0xFFFF:
+            return
+
+        ULONG_PTR = ctypes.c_ulonglong if ctypes.sizeof(ctypes.c_void_p) == 8 else ctypes.c_ulong
+
+        class KEYBDINPUT(ctypes.Structure):
+            _fields_ = [
+                ("wVk", ctypes.c_ushort),
+                ("wScan", ctypes.c_ushort),
+                ("dwFlags", ctypes.c_ulong),
+                ("time", ctypes.c_ulong),
+                ("dwExtraInfo", ULONG_PTR),
+            ]
+
+        class INPUTUNION(ctypes.Union):
+            _fields_ = [("ki", KEYBDINPUT)]
+
+        class INPUT(ctypes.Structure):
+            _fields_ = [("type", ctypes.c_ulong), ("union", INPUTUNION)]
+
+        flags = 0x0004 | (0x0002 if key_up else 0)
+        event = INPUT(type=1, union=INPUTUNION(ki=KEYBDINPUT(0, codepoint, flags, 0, ULONG_PTR(0))))
+        sent = ctypes.windll.user32.SendInput(1, ctypes.byref(event), ctypes.sizeof(event))
+        if sent != 1:
+            raise OSError("Windows did not accept the keyboard input event.")
 
     def list_registered_actions(self) -> list[dict[str, str]]:
         return [
@@ -749,6 +835,252 @@ Open `index.html` in a browser to preview it.
         resolved = Path(path).expanduser()
         os.startfile(str(resolved))
         return f"Opened {resolved}"
+
+    def list_folder(self, path: Path, limit: int = 80) -> str:
+        resolved = Path(path).expanduser().resolve()
+        if not resolved.exists():
+            raise OSError(f"Folder does not exist: {resolved}")
+        if not resolved.is_dir():
+            raise OSError(f"Expected a folder, got file: {resolved}")
+
+        entries = sorted(
+            resolved.iterdir(),
+            key=lambda item: (not item.is_dir(), item.name.lower()),
+        )
+        visible_entries = entries[: max(1, limit)]
+        lines = [f"Obsah slozky {resolved}:"]
+        for item in visible_entries:
+            marker = "[DIR]" if item.is_dir() else "[FILE]"
+            lines.append(f"- {marker} {item.name}")
+        remaining = len(entries) - len(visible_entries)
+        if remaining > 0:
+            lines.append(f"... a jeste {remaining} dalsich polozek.")
+        if not visible_entries:
+            lines.append("- slozka je prazdna")
+        return "\n".join(lines)
+
+    def read_text_file(self, path: Path, max_chars: int = 12000) -> str:
+        resolved = Path(path).expanduser().resolve()
+        if not resolved.exists():
+            raise OSError(f"File does not exist: {resolved}")
+        if not resolved.is_file():
+            raise OSError(f"Expected a file, got folder: {resolved}")
+
+        size = resolved.stat().st_size
+        if size > 2_000_000:
+            raise OSError(f"File is too large to read safely: {resolved} ({size} bytes)")
+
+        content = resolved.read_text(encoding="utf-8", errors="replace")
+        truncated = len(content) > max_chars
+        if truncated:
+            content = content[:max_chars].rstrip()
+
+        suffix = "\n\n... soubor je zkraceny, protoze je dlouhy." if truncated else ""
+        return f"Soubor {resolved}:\n\n{content}{suffix}"
+
+    def find_paths(
+        self,
+        roots: list[Path],
+        query: str,
+        *,
+        prefer_directory: bool | None = None,
+        max_results: int = 20,
+        max_scanned: int = 8000,
+    ) -> str:
+        cleaned_query = str(query or "").strip().strip('"').strip("'").lower()
+        if not cleaned_query:
+            raise OSError("Missing file or folder search query.")
+
+        results: list[Path] = []
+        scanned = 0
+        seen_roots: set[str] = set()
+        for root in roots:
+            resolved_root = Path(root).expanduser().resolve()
+            root_key = str(resolved_root).lower()
+            if root_key in seen_roots or not resolved_root.exists() or not resolved_root.is_dir():
+                continue
+            seen_roots.add(root_key)
+            for current_root, dir_names, file_names in os.walk(resolved_root):
+                scanned += 1
+                if scanned > max_scanned or len(results) >= max_results:
+                    break
+                names = dir_names if prefer_directory is True else file_names if prefer_directory is False else [*dir_names, *file_names]
+                for name in names:
+                    if cleaned_query in name.lower():
+                        candidate = Path(current_root) / name
+                        if prefer_directory is True and not candidate.is_dir():
+                            continue
+                        if prefer_directory is False and not candidate.is_file():
+                            continue
+                        results.append(candidate)
+                        if len(results) >= max_results:
+                            break
+                if len(results) >= max_results:
+                    break
+            if scanned > max_scanned or len(results) >= max_results:
+                break
+
+        if not results:
+            return f"Nenasla jsem nic pro `{query}` v omezenem rozsahu hledani."
+
+        lines = [f"Nasla jsem {len(results)} vysledku pro `{query}`:"]
+        for path in results:
+            marker = "[DIR]" if path.is_dir() else "[FILE]"
+            lines.append(f"- {marker} {path}")
+        if scanned > max_scanned:
+            lines.append("Hledani jsem zastavila na bezpecnem limitu, aby se neprochazel cely disk.")
+        return "\n".join(lines)
+
+    def _chrome_candidates(self) -> list[Path]:
+        roots = [
+            os.environ.get("LOCALAPPDATA", ""),
+            os.environ.get("PROGRAMFILES", ""),
+            os.environ.get("PROGRAMFILES(X86)", ""),
+        ]
+        candidates: list[Path] = []
+        for root in roots:
+            if not root:
+                continue
+            candidates.append(Path(root) / "Google" / "Chrome" / "Application" / "chrome.exe")
+        return candidates
+
+    def _find_chrome_path(self) -> Path | None:
+        for candidate in self._chrome_candidates():
+            if candidate.exists():
+                return candidate
+        return None
+
+    def _normalize_url(self, value: str) -> str:
+        url = str(value or "").strip()
+        if not url:
+            raise OSError("Missing URL.")
+        if url.lower().startswith("localhost:"):
+            return f"http://{url}"
+        if url.lower().startswith("www."):
+            return f"https://{url}"
+        if not re.match(r"^https?://", url, flags=re.IGNORECASE):
+            return f"https://{url}"
+        return url
+
+    def open_url(self, url: str, *, prefer_chrome: bool = False) -> dict[str, str | bool]:
+        normalized_url = self._normalize_url(url)
+        chrome_path = self._find_chrome_path() if prefer_chrome else None
+        if chrome_path is not None:
+            subprocess.Popen([str(chrome_path), normalized_url])
+        else:
+            os.startfile(normalized_url)
+        return self._result(
+            ok=True,
+            status="completed",
+            message=f"Otevřela jsem {normalized_url}.",
+            detail=f"URL opened: {normalized_url}",
+            category="app_launch",
+            action_key="open_url",
+        )
+
+    def search_web(self, query: str, *, prefer_chrome: bool = False) -> dict[str, str | bool]:
+        cleaned_query = str(query or "").strip()
+        if not cleaned_query:
+            return self._result(
+                ok=False,
+                status="failed",
+                message="Chybi hledany dotaz.",
+                detail="No search query was provided.",
+                category="app_launch",
+                action_key="search_web",
+            )
+        url = f"https://www.google.com/search?q={quote_plus(cleaned_query)}"
+        result = self.open_url(url, prefer_chrome=prefer_chrome)
+        result["message"] = f"Hledám na webu: {cleaned_query}"
+        result["action_key"] = "search_web"
+        return result
+
+    def open_browser(self, *, prefer_chrome: bool = True) -> dict[str, str | bool]:
+        return self.open_url("https://www.google.com", prefer_chrome=prefer_chrome)
+
+    def press_shortcut(self, shortcut: str) -> dict[str, str | bool]:
+        self._require_windows_input()
+        parts = [part.strip() for part in re.split(r"\+|\s+", str(shortcut or "")) if part.strip()]
+        if not parts:
+            raise OSError("Missing shortcut.")
+        if len(parts) > 4:
+            raise OSError("Shortcut is too long for safe automation.")
+
+        keys = [self._virtual_key_for(part) for part in parts]
+        for key in keys:
+            self._key_event(key, key_up=False)
+            time.sleep(0.025)
+        for key in reversed(keys):
+            self._key_event(key, key_up=True)
+            time.sleep(0.025)
+
+        return self._result(
+            ok=True,
+            status="completed",
+            message=f"Stiskla jsem zkratku {shortcut}.",
+            detail=f"Keyboard shortcut pressed: {shortcut}",
+            category="system_input",
+            action_key="press_shortcut",
+        )
+
+    def type_text(self, text: str, *, interval_seconds: float = 0.01, max_chars: int = 1200) -> dict[str, str | bool]:
+        self._require_windows_input()
+        content = str(text or "")
+        if not content:
+            raise OSError("Missing text to type.")
+        if len(content) > max_chars:
+            raise OSError(f"Text is too long for safe typing ({len(content)} chars, max {max_chars}).")
+
+        for char in content:
+            if char == "\n":
+                self._key_event(self._virtual_key_for("enter"), key_up=False)
+                self._key_event(self._virtual_key_for("enter"), key_up=True)
+            else:
+                self._unicode_key_event(char, key_up=False)
+                self._unicode_key_event(char, key_up=True)
+            if interval_seconds > 0:
+                time.sleep(min(interval_seconds, 0.05))
+
+        return self._result(
+            ok=True,
+            status="completed",
+            message="Napsala jsem text do aktivního okna.",
+            detail=f"Typed {len(content)} characters into the active window.",
+            category="system_input",
+            action_key="type_text",
+        )
+
+    def mouse_click(self, x: int, y: int, *, button: str = "left", clicks: int = 1) -> dict[str, str | bool]:
+        self._require_windows_input()
+        x_pos = int(x)
+        y_pos = int(y)
+        safe_clicks = max(1, min(int(clicks), 2))
+        button_name = str(button or "left").strip().lower()
+        button_flags = {
+            "left": (0x0002, 0x0004),
+            "right": (0x0008, 0x0010),
+            "middle": (0x0020, 0x0040),
+        }
+        if button_name not in button_flags:
+            raise OSError(f"Unsupported mouse button: {button}")
+        down_flag, up_flag = button_flags[button_name]
+
+        ctypes.windll.user32.SetCursorPos(x_pos, y_pos)
+        time.sleep(0.05)
+        for _ in range(safe_clicks):
+            ctypes.windll.user32.mouse_event(down_flag, 0, 0, 0, 0)
+            time.sleep(0.035)
+            ctypes.windll.user32.mouse_event(up_flag, 0, 0, 0, 0)
+            time.sleep(0.08)
+
+        return self._result(
+            ok=True,
+            status="completed",
+            message=f"Klikla jsem na souřadnice {x_pos}, {y_pos}.",
+            detail=f"Mouse clicked {button_name} at {x_pos}, {y_pos}.",
+            category="system_input",
+            action_key="mouse_click",
+        )
 
     def _optional_open_detail(self, path: Path) -> str:
         try:

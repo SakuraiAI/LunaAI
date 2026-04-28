@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import Callable
 from collections import OrderedDict
 import re
+import time
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from config.settings import AppSettings
@@ -19,6 +20,8 @@ from app.memory.chat_memory import ChatMemory
 from app.memory.long_memory import LongMemory
 from app.models.local_model import LocalModel
 from app.models.nvidia_model import NvidiaModel
+from app.models.nvidia_speech_model import NvidiaSpeechModel
+from app.models.nvidia_tts_model import NvidiaTtsModel
 from app.models.nvidia_vision_model import NvidiaVisionModel
 from app.tools.desktop_actions import DesktopActionTool
 from app.tools.desktop_observer import DesktopObserverTool
@@ -62,6 +65,27 @@ class LunaEngine:
             base_url=self.settings.vision_nvidia_base_url,
             api_token=self.settings.vision_nvidia_api_token,
             timeout_seconds=self.settings.vision_nvidia_timeout_seconds,
+        )
+        self.speech_model = NvidiaSpeechModel(
+            model_name=self.settings.speech_nvidia_model,
+            base_url=self.settings.speech_nvidia_base_url,
+            api_token=self.settings.speech_nvidia_api_token,
+            server=self.settings.speech_nvidia_server,
+            function_id=self.settings.speech_nvidia_function_id,
+            use_ssl=self.settings.speech_nvidia_use_ssl,
+            timeout_seconds=self.settings.speech_nvidia_timeout_seconds,
+            language=self.settings.speech_nvidia_language,
+        )
+        self.tts_model = NvidiaTtsModel(
+            model_name=self.settings.tts_nvidia_model,
+            api_token=self.settings.tts_nvidia_api_token,
+            server=self.settings.tts_nvidia_server,
+            function_id=self.settings.tts_nvidia_function_id,
+            use_ssl=self.settings.tts_nvidia_use_ssl,
+            timeout_seconds=self.settings.tts_nvidia_timeout_seconds,
+            language=self.settings.tts_nvidia_language,
+            voice=self.settings.tts_nvidia_voice,
+            sample_rate_hz=self.settings.tts_nvidia_sample_rate,
         )
         self.memory = ChatMemory(Path(self.settings.memory_path))
         self.long_memory = LongMemory(Path(self.settings.long_memory_path))
@@ -360,6 +384,8 @@ class LunaEngine:
                 "Never present guesses as verified facts. "
                 "If you summarize project status, distinguish verified local state, visible on-screen context, and uncertain inference. "
                 "Do not invent files, commands, successful runs, or project structure unless they are present in trusted context. "
+                "Use the same trusted context priority as Luna: confirmed action results, newest live desktop frame, active project, long-term memory, then older chat. "
+                "When the user asks Xeno directly, answer as Xeno but still stay inside the same LunaAI platform and use shared screen/project context. "
                 "Use emoji occasionally and naturally, especially in short human replies. "
                 "For technical answers keep them restrained, usually zero or one. "
                 "Prefer calm emoji such as 🙂, ✨, 👀, or 🌙, and never overdo it. "
@@ -510,9 +536,13 @@ class LunaEngine:
             return bool(workspace.allow_app_launch)
         if category == "path_open":
             return bool(workspace.allow_path_open)
+        if category == "file_read":
+            return bool(workspace.allow_path_open)
         if category == "file_change":
             return bool(workspace.allow_file_changes)
         if category == "project_run":
+            return bool(workspace.allow_app_launch)
+        if category == "system_input":
             return bool(workspace.allow_app_launch)
         return True
 
@@ -563,6 +593,10 @@ class LunaEngine:
             "- capture a screenshot when a backend is available",
             "- open connected apps and workspaces",
             "- open files and folders",
+            "- list folders and read text files",
+            "- find files and folders in bounded local search roots",
+            "- open Chrome/browser URLs and web searches",
+            "- press keyboard shortcuts, type text, and click exact coordinates after confirmation",
             "- create folders and files",
             "- overwrite or append file content",
             "- scaffold python, web, and electron projects",
@@ -630,6 +664,10 @@ class LunaEngine:
         except Exception as error:
             return f"Vision analysis was requested but failed: {error}"
 
+    @staticmethod
+    def _safe_timestamp_slug() -> str:
+        return str(int(time.time() * 1000))
+
     def analyze_visual_media(self, file_paths: list[str], query: str = "") -> dict[str, object]:
         cleaned_paths = [str(path).strip() for path in file_paths if str(path).strip()]
         summary = self._analyze_visual_media(
@@ -640,6 +678,73 @@ class LunaEngine:
             "ok": bool(summary.strip()),
             "summary": summary,
             "files": cleaned_paths,
+        }
+
+    def transcribe_audio_file(self, file_path: str, language: str = "") -> dict[str, object]:
+        cleaned_path = str(file_path or "").strip()
+        if not cleaned_path:
+            return {
+                "ok": False,
+                "transcript": "",
+                "message": "Missing audio file path.",
+            }
+        if not self.speech_model.is_available():
+            return {
+                "ok": False,
+                "transcript": "",
+                "message": "NVIDIA speech-to-text is not configured.",
+            }
+        try:
+            transcript = self.speech_model.transcribe_audio(cleaned_path, language=language or self.settings.speech_nvidia_language)
+        except Exception as error:
+            return {
+                "ok": False,
+                "transcript": "",
+                "message": str(error),
+                "file": cleaned_path,
+            }
+        return {
+            "ok": True,
+            "transcript": transcript,
+            "message": "Speech transcription completed.",
+            "file": cleaned_path,
+        }
+
+    def synthesize_speech_text(self, text: str, language: str = "", voice: str = "") -> dict[str, object]:
+        cleaned_text = str(text or "").strip()
+        if not cleaned_text:
+            return {
+                "ok": False,
+                "audioPath": "",
+                "message": "Missing text for text-to-speech.",
+            }
+        if not self.tts_model.is_available():
+            return {
+                "ok": False,
+                "audioPath": "",
+                "message": "NVIDIA text-to-speech is not configured.",
+            }
+
+        output_dir = Path(self.settings.tts_output_dir)
+        output_dir.mkdir(parents=True, exist_ok=True)
+        output_path = output_dir / f"tts_{self._safe_timestamp_slug()}.wav"
+        try:
+            audio_path = self.tts_model.synthesize_to_file(
+                cleaned_text,
+                output_path,
+                language=language or self.settings.tts_nvidia_language,
+                voice=voice or self.settings.tts_nvidia_voice,
+            )
+        except Exception as error:
+            return {
+                "ok": False,
+                "audioPath": "",
+                "message": str(error),
+            }
+        return {
+            "ok": True,
+            "audioPath": str(audio_path),
+            "message": "Text-to-speech audio generated.",
         }
 
     def get_observe_mode_enabled(self) -> bool:
@@ -924,6 +1029,23 @@ class LunaEngine:
         }
 
     def _plan_action_with_xeno(self, category: str, title: str) -> dict[str, object]:
+        simple_reasons = {
+            "app_launch": "Otevření aplikace, URL nebo webového hledání je lokální akce. Spustím ji jen podle nastaveného režimu potvrzení.",
+            "path_open": "Otevření cesty nemění soubory, jen zobrazí existující soubor nebo složku.",
+            "file_read": "Čtení souboru nebo výpis složky nic nemění v počítači, pouze vrátí obsah nebo seznam položek.",
+            "project_run": "Spuštění projektu je lokální akce a může otevřít proces nebo prohlížeč, proto respektuje potvrzení.",
+            "system_input": "Systémový vstup ovládá aktivní okno, proto ho držím za potvrzením a provádím jen přesný požadovaný krok.",
+        }
+        if category in simple_reasons:
+            return {
+                "status": "approved",
+                "intent": category,
+                "risk": "low" if category in {"path_open", "file_read"} else "medium",
+                "requiresConfirmation": True if category == "system_input" else self._action_mode() == "ask",
+                "recommendedAction": title,
+                "reason": simple_reasons[category],
+                "category": category,
+            }
         try:
             action_plan = self.xeno.plan_action(
                 category=category,
@@ -990,6 +1112,7 @@ class LunaEngine:
             self._log_action(category, title, "blocked", str(result.get("detail", "")))
             return self._format_action_result_for_chat(result)
         mode = self._action_mode()
+        force_confirmation = category in {"system_input"}
         if mode == "block":
             result = self._coerce_action_result(
                 {
@@ -1003,7 +1126,7 @@ class LunaEngine:
             )
             self._log_action(category, title, "blocked", str(result.get("detail", "")))
             return self._format_action_result_for_chat(result)
-        if mode == "ask":
+        if mode == "ask" or force_confirmation:
             self.pending_action = (category, title, callback)
             self.pending_action_plan = action_plan
             self._log_action(category, title, "pending", f"Pending approval for {title}.")
@@ -1103,6 +1226,70 @@ class LunaEngine:
             return workspace_candidate
         return None
 
+    def _resolve_known_user_folder(self, raw_target: str) -> Path | None:
+        cleaned = ascii_fold_text(raw_target).lower().strip(" .,:;\"'")
+        cleaned = re.sub(r"^(?:moje|moji|muj|my|the)\s+", "", cleaned)
+        cleaned = re.sub(r"^(?:slozka|folder|adresar)\s+", "", cleaned).strip()
+        home = Path.home()
+        known_folders: dict[str, Path] = {
+            "home": home,
+            "profil": home,
+            "uzivatel": home,
+            "user": home,
+            "plocha": home / "Desktop",
+            "plochu": home / "Desktop",
+            "desktop": home / "Desktop",
+            "downloads": home / "Downloads",
+            "stazene": home / "Downloads",
+            "stazeni": home / "Downloads",
+            "stazene soubory": home / "Downloads",
+            "dokumenty": home / "Documents",
+            "dokumentu": home / "Documents",
+            "documents": home / "Documents",
+            "obrazky": home / "Pictures",
+            "obrazku": home / "Pictures",
+            "pictures": home / "Pictures",
+            "videa": home / "Videos",
+            "videi": home / "Videos",
+            "videos": home / "Videos",
+            "hudba": home / "Music",
+            "hudbu": home / "Music",
+            "music": home / "Music",
+        }
+        target = known_folders.get(cleaned)
+        if target is not None and target.exists():
+            return target
+        return None
+
+    def _resolve_pc_target(self, raw_target: str, *, prefer_directory: bool | None = None) -> Path | None:
+        target_text = repair_text(raw_target).strip().strip('"').strip("'")
+        target_text = re.sub(r"\s+(?:ve|v)\s+(?:vscode|vs code)$", "", target_text, flags=re.IGNORECASE).strip()
+        if not target_text:
+            return self._default_action_root() if prefer_directory is not False else None
+
+        folded = ascii_fold_text(target_text).lower().strip(" .,:;")
+        if folded in {"tady", "zde", "projekt", "workspace", "root", "koren", "."}:
+            return self._default_action_root() if prefer_directory is not False else None
+
+        known_folder = self._resolve_known_user_folder(target_text)
+        if known_folder is not None:
+            if prefer_directory is False and not known_folder.is_file():
+                return None
+            return known_folder
+
+        local_target = self._resolve_local_target(target_text)
+        if local_target is not None:
+            if prefer_directory is True and not local_target.is_dir():
+                return None
+            if prefer_directory is False and not local_target.is_file():
+                return None
+            return local_target
+
+        named_target = self._find_named_target(target_text, prefer_directory=prefer_directory)
+        if named_target is not None:
+            return named_target
+        return self._find_recent_workspace_target(target_text, prefer_directory=prefer_directory)
+
     def _default_action_root(self) -> Path:
         current_project = self.projects.get_current_project()
         if current_project is not None:
@@ -1174,6 +1361,19 @@ class LunaEngine:
         cwd = Path.cwd()
         if cwd not in roots:
             roots.append(cwd)
+        return roots
+
+    def _pc_file_search_roots(self) -> list[Path]:
+        roots = [*self._search_roots()]
+        home = Path.home()
+        for candidate in [
+            home / "Desktop",
+            home / "Documents",
+            home / "Downloads",
+            self.desktop_actions.workspace_root,
+        ]:
+            if candidate.exists() and candidate not in roots:
+                roots.append(candidate)
         return roots
 
     def _find_named_target(self, target_name: str, *, prefer_directory: bool | None = None) -> Path | None:
@@ -1274,7 +1474,11 @@ class LunaEngine:
         lowered = " ".join(parts).lower()
         if any(token in lowered for token in ["vytvor", "udelej", "create", "make", "prepis", "rewrite", "overwrite", "append", "pridej do"]):
             return "file_change"
-        if any(token in lowered for token in ["vscode", "vs code", "blender", "unreal", "unity", "photoshop", "davinci", "premiere", "after effects", "figma", "fl studio", "substance"]):
+        if any(token in lowered for token in ["precti", "read file", "vypis slozku", "vypis folder", "list folder", "obsah slozky", "najdi soubor", "najdi slozku", "find file", "find folder"]):
+            return "file_read"
+        if any(token in lowered for token in ["stiskni", "zmackni", "press ", "klaves", "shortcut", "klikni", "click", "napis text", "type text", "system input"]):
+            return "system_input"
+        if any(token in lowered for token in ["vscode", "vs code", "blender", "unreal", "unity", "photoshop", "davinci", "premiere", "after effects", "figma", "fl studio", "substance", "chrome", "browser", "prohlizec", "http://", "https://", "localhost", "vyhledej", "search", "google"]):
             return "app_launch"
         return "path_open"
 
@@ -1328,6 +1532,122 @@ class LunaEngine:
         if not normalized:
             return None
 
+        list_folder_patterns = [
+            r'(?:vypis|ukaz|zobraz|list|show) (?:mi )?(?:obsah )?(?:slozky|slozku|folder|adresar) ?(.+)?$',
+            r'(?:co je|co mam|co se nachazi) (?:ve|v) (?:slozce|folderu|adresari) (.+)$',
+            r'(?:obsah slozky|folder contents) (.+)$',
+        ]
+        for pattern in list_folder_patterns:
+            match = re.search(pattern, normalized, flags=re.IGNORECASE)
+            if not match:
+                continue
+            raw_target = str(match.group(1) or "").strip()
+            target = self._resolve_pc_target(raw_target, prefer_directory=True)
+            if target is None:
+                return "Luna: Tu slozku jsem v pocitaci nenasla."
+            return self._guarded_action("file_read", f"list folder {target}", lambda: self.desktop_actions.list_folder(target))
+
+        read_file_patterns = [
+            r'(?:precti|ukaz|zobraz|read|show) (?:mi )?(?:obsah )?(?:soubor|file) (.+)$',
+            r'(?:co je v souboru|obsah souboru) (.+)$',
+        ]
+        for pattern in read_file_patterns:
+            match = re.search(pattern, normalized, flags=re.IGNORECASE)
+            if not match:
+                continue
+            target = self._resolve_pc_target(match.group(1), prefer_directory=False)
+            if target is None:
+                return "Luna: Ten soubor jsem v pocitaci nenasla."
+            return self._guarded_action("file_read", f"read file {target}", lambda: self.desktop_actions.read_text_file(target))
+
+        find_path_patterns = [
+            (r'(?:najdi|hledej|find) (?:mi )?(?:soubor|file) (.+)$', False),
+            (r'(?:najdi|hledej|find) (?:mi )?(?:slozku|slo\?ku|folder|adresar) (.+)$', True),
+            (r'(?:najdi|hledej|find) (?:mi )?(?:v pc|na pc|v pocitaci|on pc) (.+)$', None),
+        ]
+        for pattern, prefer_directory in find_path_patterns:
+            match = re.search(pattern, normalized, flags=re.IGNORECASE)
+            if not match:
+                continue
+            query = match.group(1).strip()
+            if not query:
+                return "Luna: Chybi nazev, ktery mam hledat."
+            return self._guarded_action(
+                "file_read",
+                f"find {query}",
+                lambda: self.desktop_actions.find_paths(self._pc_file_search_roots(), query, prefer_directory=prefer_directory),
+            )
+
+        url_match = re.search(r'(https?://\S+|localhost:\d+(?:/\S*)?|www\.\S+)', repair_text(user_input), flags=re.IGNORECASE)
+        if url_match and any(token in lowered for token in ["otevri", "open", "spust", "spus?", "zapni", "launch"]):
+            raw_url = url_match.group(1).strip().rstrip(".,;)]}\"'")
+            prefer_chrome = any(token in lowered for token in ["chrome", "google chrome", "prohlizec", "browser"])
+            return self._guarded_action("app_launch", f"open url {raw_url}", lambda: self.desktop_actions.open_url(raw_url, prefer_chrome=prefer_chrome))
+
+        browser_match = re.fullmatch(
+            r'(?:otevri|otev\?i|open|spust|spus\?|zapni|launch|start) (?:mi )?(?:google chrome|chrome|prohlizec|browser)(?: .*)?',
+            normalized,
+            flags=re.IGNORECASE,
+        )
+        if browser_match:
+            return self._guarded_action("app_launch", "open Chrome", lambda: self.desktop_actions.open_browser(prefer_chrome=True))
+
+        open_known_folder_match = re.fullmatch(
+            r'(?:otevri|otev\?i|open|spust|spus\?|zapni|launch|start) (?:mi )?(plochu|plocha|desktop|downloads|stazene|stazeni|stazene soubory|dokumenty|documents|obrazky|pictures|videa|videos|hudba|music)',
+            normalized,
+            flags=re.IGNORECASE,
+        )
+        if open_known_folder_match:
+            target = self._resolve_known_user_folder(open_known_folder_match.group(1))
+            if target is None:
+                return "Luna: Tuhle systemovou slozku jsem v pocitaci nenasla."
+            return self._guarded_action("path_open", f"open path {target}", lambda: self.desktop_actions.open_path(target))
+
+        domain_match = re.fullmatch(
+            r'(?:otevri|otev\?i|open|spust|spus\?|zapni|launch|start) (?:mi )?(?:odkaz|url|stranku|web|v chrome|in chrome)?\s*([a-z0-9][a-z0-9.-]+\.[a-z]{2,}(?:/\S*)?)',
+            normalized,
+            flags=re.IGNORECASE,
+        )
+        if domain_match:
+            raw_url = domain_match.group(1).strip()
+            prefer_chrome = any(token in lowered for token in ["chrome", "google chrome"])
+            return self._guarded_action("app_launch", f"open url {raw_url}", lambda: self.desktop_actions.open_url(raw_url, prefer_chrome=prefer_chrome))
+
+        search_match = re.search(
+            r'(?:vyhledej|hledej|najdi na webu|najdi na google|search|google)(?: (?:v|ve|na) (?:chrome|google|webu|internetu))? (.+)$',
+            normalized,
+            flags=re.IGNORECASE,
+        )
+        if search_match:
+            query = search_match.group(1).strip()
+            if not query:
+                return "Luna: Chybi hledany dotaz."
+            prefer_chrome = any(token in lowered for token in ["chrome", "google chrome"])
+            return self._guarded_action("app_launch", f"search web for {query}", lambda: self.desktop_actions.search_web(query, prefer_chrome=prefer_chrome))
+
+        shortcut_match = re.fullmatch(
+            r'(?:stiskni|zmackni|press) (?:klavesu |klavesovou zkratku |zkratku |key |shortcut )?([a-z0-9+\-\s]+)',
+            normalized,
+            flags=re.IGNORECASE,
+        )
+        if shortcut_match:
+            shortcut = shortcut_match.group(1).strip().replace("-", "+")
+            if not shortcut:
+                return "Luna: Chybi klavesa nebo zkratka."
+            return self._guarded_action("system_input", f"press shortcut {shortcut}", lambda: self.desktop_actions.press_shortcut(shortcut))
+
+        click_match = re.fullmatch(
+            r'(?:klikni|click) (?:na |at )?(?:x\s*=?\s*)?(\d{1,5})\s*(?:,|;|\s)\s*(?:y\s*=?\s*)?(\d{1,5})(?:\s*(left|right|middle|levym|pravym|prostrednim))?',
+            normalized,
+            flags=re.IGNORECASE,
+        )
+        if click_match:
+            x_pos = int(click_match.group(1))
+            y_pos = int(click_match.group(2))
+            button_map = {"levym": "left", "pravym": "right", "prostrednim": "middle"}
+            button = button_map.get(str(click_match.group(3) or "left").lower(), str(click_match.group(3) or "left").lower())
+            return self._guarded_action("system_input", f"mouse click {x_pos},{y_pos}", lambda: self.desktop_actions.mouse_click(x_pos, y_pos, button=button))
+
         email_match = re.search(
             r'\b(?:posli|po\?li|odesli|ode\?li|napis|napi\?|priprav|vytvor|send|write|draft) (?:mi )?(?:e-?mail|mail)\b|\b(?:e-?mail|mail) (?:na|to)\b',
             normalized,
@@ -1351,6 +1671,23 @@ class LunaEngine:
                 )
 
             return self._guarded_action("communication", f"draft email to {recipient_label}", create_email_draft)
+
+        type_text_match = re.search(
+            r'(?:napis|napiš|type|write) (?:mi )?(?:text |do aktivniho okna |do okna |into active window )?["“](.+?)["”]$',
+            repair_text(user_input),
+            flags=re.IGNORECASE | re.DOTALL,
+        )
+        if not type_text_match:
+            type_text_match = re.search(
+                r'(?:napis|napi\?|type|write) (?:mi )?(?:text|do aktivniho okna|do okna|into active window)\s+(.+)$',
+                normalized,
+                flags=re.IGNORECASE | re.DOTALL,
+            )
+        if type_text_match:
+            text_to_type = repair_text(type_text_match.group(1)).strip()
+            if not text_to_type:
+                return "Luna: Chybi text, ktery mam napsat."
+            return self._guarded_action("system_input", "type text into active window", lambda: self.desktop_actions.type_text(text_to_type))
 
         scripts_match = re.fullmatch(
             r'(?:vytvor|vytvo\?|udelej|ud\?lej|create|make|priprav|prepare) (?:projektove |project )?(?:skripty|skripty\.?|scripts?|srcipts|scriots|bat skripty|bat scripts)(?: .*)?',

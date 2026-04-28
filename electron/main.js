@@ -210,6 +210,10 @@ ipcMain.handle('files:read-as-data-url', async (_, filePath) => {
       '.jpeg': 'image/jpeg',
       '.webp': 'image/webp',
       '.gif': 'image/gif',
+      '.wav': 'audio/wav',
+      '.mp3': 'audio/mpeg',
+      '.ogg': 'audio/ogg',
+      '.opus': 'audio/ogg',
     };
     const mime = mimeByExtension[extension] || 'application/octet-stream';
     return {
@@ -375,6 +379,14 @@ ipcMain.handle('luna:observe-desktop', async (_, payload) => {
 
 ipcMain.handle('luna:analyze-visual', async (_, payload) => {
   return mergePendingLunaAction(await runLunaBridge({ action: 'analyze_visual', ...(payload || {}) }));
+});
+
+ipcMain.handle('luna:transcribe-audio', async (_, payload) => {
+  return mergePendingLunaAction(await runLunaBridge({ action: 'transcribe_audio', ...(payload || {}) }));
+});
+
+ipcMain.handle('luna:synthesize-speech', async (_, payload) => {
+  return mergePendingLunaAction(await runLunaBridge({ action: 'synthesize_speech', ...(payload || {}) }));
 });
 
 ipcMain.handle('luna:set-observe-mode', async (_, enabled) => {

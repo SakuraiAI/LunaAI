@@ -1639,6 +1639,13 @@ button:hover { transform: translateY(-1px); }
 
 .input-icon-glyph { width: 18px; height: 18px; display: block; }
 .input-icon-button { display: grid; place-items: center; }
+.input-icon-button.is-recording {
+  color: #fff;
+  border-color: rgba(217,75,75,0.62);
+  background: linear-gradient(180deg, rgba(62,20,20,0.92) 0%, rgba(30,14,14,0.96) 100%);
+  box-shadow: 0 0 0 1px rgba(217,75,75,0.18), 0 0 28px rgba(217,75,75,0.28);
+  animation: recordingButtonPulse 1.2s ease-in-out infinite;
+}
 .chat-input-shell.is-centered .input-icon-button {
   width: clamp(50px, 5vw, 62px);
   height: clamp(50px, 5vw, 62px);
@@ -1646,8 +1653,165 @@ button:hover { transform: translateY(-1px); }
 }
 .input-icon-button-solid { background: var(--white); color: #111; border-color: transparent; box-shadow: 0 10px 24px rgba(255,255,255,0.08); }
 .input-icon-button-solid:hover { background: #ffffff; }
+.input-icon-button-solid.is-speaking {
+  background: #ffffff;
+  color: #111;
+  box-shadow: 0 0 0 1px rgba(255,255,255,0.28), 0 0 32px rgba(255,255,255,0.22);
+  animation: speakingButtonPulse 1s ease-in-out infinite;
+}
+.input-icon-button-solid.is-voice-loop {
+  border-color: rgba(255,255,255,0.36);
+  box-shadow: 0 0 0 1px rgba(255,255,255,0.22), 0 0 36px rgba(255,255,255,0.2);
+}
+.input-icon-button-solid.is-voice-loop::after {
+  content: "";
+  position: absolute;
+  width: 8px;
+  height: 8px;
+  right: 9px;
+  top: 9px;
+  border-radius: 50%;
+  background: #d94b4b;
+  box-shadow: 0 0 14px rgba(217,75,75,0.7);
+}
+@keyframes recordingButtonPulse {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.06); }
+}
+@keyframes speakingButtonPulse {
+  0%, 100% { transform: scale(1); filter: brightness(1); }
+  50% { transform: scale(1.05); filter: brightness(1.12); }
+}
 
 .sidebar-empty { padding: 12px 10px; border-radius: 16px; background: #101010; border: 1px dashed #242424; color: var(--text-dim); font-size: 0.74rem; text-align: center; }
+
+.voice-session-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+  background:
+    radial-gradient(circle at 50% 42%, rgba(255,255,255,0.07), transparent 32%),
+    rgba(0,0,0,0.32);
+  backdrop-filter: blur(12px);
+}
+.voice-session-card {
+  position: relative;
+  width: min(92vw, 560px);
+  padding: 34px;
+  border-radius: 38px;
+  background: linear-gradient(180deg, rgba(20,20,20,0.97) 0%, rgba(10,10,10,0.98) 100%);
+  border: 1px solid rgba(255,255,255,0.1);
+  box-shadow: 0 28px 90px rgba(0,0,0,0.56), inset 0 1px 0 rgba(255,255,255,0.04);
+  pointer-events: auto;
+  overflow: hidden;
+}
+.voice-session-card::before {
+  content: "";
+  position: absolute;
+  inset: -30%;
+  background:
+    radial-gradient(circle at 50% 42%, rgba(255,255,255,0.12), transparent 22%),
+    radial-gradient(circle at 50% 42%, rgba(217,75,75,0.12), transparent 34%);
+  opacity: 0.35;
+  pointer-events: none;
+}
+.voice-session-close {
+  position: absolute;
+  top: 18px;
+  right: 18px;
+  z-index: 2;
+  width: 38px;
+  height: 38px;
+  border-radius: 50%;
+  background: rgba(255,255,255,0.06);
+  color: var(--text);
+  border: 1px solid rgba(255,255,255,0.08);
+}
+.voice-session-orb-wrap {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 24px;
+  margin: 8px 0 26px;
+}
+.voice-session-connector {
+  width: 90px;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(255,255,255,0.36));
+}
+.voice-session-connector-right {
+  background: linear-gradient(90deg, rgba(255,255,255,0.36), transparent);
+}
+.voice-session-orb {
+  transform: scale(1.42);
+}
+.voice-session-overlay.is-listening .voice-session-orb,
+.voice-session-overlay.is-speaking .voice-session-orb {
+  animation: voiceOrbPulse 980ms ease-in-out infinite;
+}
+.voice-session-overlay.is-speaking .voice-session-card::before {
+  opacity: 0.68;
+  animation: voiceAuraPulse 980ms ease-in-out infinite;
+}
+.voice-session-overlay.is-listening .voice-session-connector,
+.voice-session-overlay.is-speaking .voice-session-connector {
+  box-shadow: 0 0 20px rgba(255,255,255,0.22);
+}
+.voice-session-copy {
+  position: relative;
+  z-index: 1;
+  text-align: center;
+}
+.voice-session-copy span {
+  display: inline-flex;
+  margin-bottom: 12px;
+  padding: 7px 12px;
+  border-radius: 999px;
+  color: var(--text-soft);
+  background: rgba(255,255,255,0.05);
+  border: 1px solid rgba(255,255,255,0.08);
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  font-size: 0.68rem;
+}
+.voice-session-copy h2 {
+  margin: 0;
+  font-size: clamp(1.8rem, 4vw, 2.55rem);
+}
+.voice-session-copy p {
+  max-width: 34rem;
+  margin: 14px auto 0;
+  color: var(--text-soft);
+  line-height: 1.65;
+}
+.voice-session-actions {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  justify-content: center;
+  gap: 12px;
+  margin-top: 26px;
+}
+.voice-session-talk,
+.voice-session-end {
+  width: auto;
+  min-width: 130px;
+  padding-inline: 18px;
+}
+@keyframes voiceOrbPulse {
+  0%, 100% { transform: scale(1.42); filter: brightness(1); }
+  50% { transform: scale(1.56); filter: brightness(1.18); }
+}
+@keyframes voiceAuraPulse {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.08); }
+}
 
 .friends-page { height: 100%; display: flex; align-items: center; justify-content: center; }
 .friends-empty-card { width: min(100%, 760px); padding: 34px; border-radius: 32px; background: #101010; border: 1px solid #1f1f1f; box-shadow: inset 0 1px 0 rgba(255,255,255,0.02), 0 18px 38px rgba(0,0,0,0.24); display: flex; flex-direction: column; align-items: center; gap: 22px; text-align: center; }

@@ -48,7 +48,11 @@ class AutoMode:
         explanation_signals = ["how", "why", "what", "explain", "understand", "jak", "proc", "co"]
         action_signals = [
             "build", "make", "create", "fix", "plan", "write", "udelat", "vytvor",
-            "otevri", "open", "implement", "scaffold", "workflow", "agent"
+            "otevri", "open", "implement", "scaffold", "workflow", "agent",
+            "precti soubor", "vypis slozku", "najdi soubor", "najdi slozku",
+            "chrome", "prohlizec", "ovladani pc", "ovladat pc",
+            "stiskni", "zmackni", "klavesovou zkratku", "klikni", "click",
+            "press shortcut", "napis text", "type text"
         ]
 
         if any(signal in normalized for signal in explanation_signals):

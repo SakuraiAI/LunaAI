@@ -38,6 +38,8 @@ class _BridgeEngine(Protocol):
     def capture_desktop_snapshot(self, include_screenshot: bool = False, *, remember: bool = True) -> dict[str, Any]: ...
     def read_attachment_context(self, file_paths: list[str]) -> str: ...
     def analyze_visual_media(self, file_paths: list[str], query: str = "") -> dict[str, Any]: ...
+    def transcribe_audio_file(self, file_path: str, language: str = "") -> dict[str, Any]: ...
+    def synthesize_speech_text(self, text: str, language: str = "", voice: str = "") -> dict[str, Any]: ...
 
 
 def _message_author(item: dict[str, str]) -> str:
@@ -167,6 +169,19 @@ def main() -> int:
         analysis = engine.analyze_visual_media(file_paths, query=query)
         result = _state(engine)
         result.update(analysis)
+    elif action == "transcribe_audio":
+        file_path = str(payload.get("filePath", "") or "")
+        language = str(payload.get("language", "") or "")
+        transcription = engine.transcribe_audio_file(file_path, language=language)
+        result = _state(engine)
+        result.update(transcription)
+    elif action == "synthesize_speech":
+        text = str(payload.get("text", "") or "")
+        language = str(payload.get("language", "") or "")
+        voice = str(payload.get("voice", "") or "")
+        speech = engine.synthesize_speech_text(text, language=language, voice=voice)
+        result = _state(engine)
+        result.update(speech)
     elif action == "set_observe_mode":
         enabled = bool(payload.get("enabled", False))
         response = engine.set_observe_mode(enabled)

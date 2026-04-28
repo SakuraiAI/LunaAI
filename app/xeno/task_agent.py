@@ -158,8 +158,11 @@ class TaskAgent:
         signals = [
             "open chrome",
             "open browser",
+            "open url",
             "find page",
             "find website",
+            "find file",
+            "find folder",
             "search for",
             "go to website",
             "open site",
@@ -167,12 +170,19 @@ class TaskAgent:
             "open page",
             "otevri chrome",
             "otevri prohlizec",
+            "otevri odkaz",
             "najdi stranku",
             "najdi web",
+            "najdi soubor",
+            "najdi slozku",
             "otevri web",
             "otevri stranku",
             "vyhledej",
             "vyhledat",
+            "precti soubor",
+            "vypis slozku",
+            "obsah slozky",
+            "co je ve slozce",
             "vytvor soubor",
             "vytvo? soubor",
             "vytvor slozku",
@@ -227,6 +237,18 @@ class TaskAgent:
             "implement",
             "workflow",
             "automation",
+            "ovladani pc",
+            "ovladat pc",
+            "stiskni",
+            "zmackni",
+            "press shortcut",
+            "klavesovou zkratku",
+            "klikni",
+            "click",
+            "mouse click",
+            "napis text",
+            "type text",
+            "do aktivniho okna",
         ]
         return any(signal in normalized for signal in signals)
 
@@ -239,6 +261,15 @@ class TaskAgent:
     def create_action_support(self, user_input: str, intelligence_level: str = "4") -> str:
         normalized = ascii_fold_text(user_input.strip().lower())
         level = str(intelligence_level).strip()
+
+        if any(signal in normalized for signal in ["stiskni", "zmackni", "press shortcut", "klavesovou zkratku", "klikni", "click", "mouse click", "napis text", "type text", "do aktivniho okna"]):
+            base = (
+                "Hidden task agent support: system input requested. "
+                "Keep the action exact, limited to the active window or explicit coordinates, and require confirmation before execution."
+            )
+            if level == "5":
+                base += " Do not infer vague clicks from screen context; ask for exact target or use a safer internal action."
+            return base
 
         if any(signal in normalized for signal in ["chrome", "browser", "prohlizec"]):
             base = (
@@ -256,6 +287,15 @@ class TaskAgent:
             )
             if level == "5":
                 base += " Keep the chain short and evidence-aware."
+            return base
+
+        if any(signal in normalized for signal in ["precti soubor", "vypis slozku", "obsah slozky", "najdi soubor", "najdi slozku", "read file", "list folder", "find file", "find folder"]):
+            base = (
+                "Hidden task agent support: local file inspection requested. "
+                "Prefer bounded read-only operations, report exact paths, and do not claim edits unless a file-change action confirms them."
+            )
+            if level == "5":
+                base += " Keep privacy and scope visible; avoid scanning the whole disk unless the user explicitly asks."
             return base
 
         if any(signal in normalized for signal in ["soubor", "file", "projekt", "project", "workspace", "vscode", "folder", "slozku", "slozky", "slo?ku", "slo?ky", "kalkulacku", "kalkula?ku", "calculator", "scripts", "script", "srcipts", "scriots", "skripty", "web", "website", "stranku", "landing", "portfolio", "email", "e-mail", "mail", "spust", "run project"]):

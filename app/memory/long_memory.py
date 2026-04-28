@@ -2,7 +2,7 @@
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from app.core.text_utils import dedupe_preserve_order, repair_text
+from app.core.text_utils import ascii_fold_text, dedupe_preserve_order, repair_text
 
 
 @dataclass(slots=True)
@@ -77,18 +77,45 @@ class LongMemory:
     def remember_from_user_input(self, user_input: str) -> None:
         text = repair_text(user_input).strip()
         lowered = text.lower()
+        folded = ascii_fold_text(text).lower()
         if not text:
             return
 
         profile_markers = ["my name is ", "i am ", "jmenuji se "]
-        preference_markers = ["i like ", "i love ", "mam rad ", "muj oblibeny "]
-        goal_markers = ["i want to learn ", "i want to improve ", "chci se naucit ", "chci zlepsit "]
-        fact_markers = ["i work on ", "i am building ", "pracuji na ", "delam na "]
+        preference_markers = [
+            "i like ",
+            "i love ",
+            "mam rad ",
+            "muj oblibeny ",
+            "preferuju ",
+            "libi se mi ",
+            "chci aby odpovedi ",
+        ]
+        goal_markers = [
+            "i want to learn ",
+            "i want to improve ",
+            "chci se naucit ",
+            "chci zlepsit ",
+            "chci aby ",
+            "chci abys ",
+            "potrebuju aby ",
+            "potreboval bych aby ",
+            "udelame ",
+        ]
+        fact_markers = [
+            "i work on ",
+            "i am building ",
+            "pracuji na ",
+            "delam na ",
+            "stavime ",
+            "budujeme ",
+            "tvorime ",
+        ]
 
         self._capture_after_marker(text, lowered, profile_markers, "profile")
-        self._capture_after_marker(text, lowered, preference_markers, "preferences")
-        self._capture_after_marker(text, lowered, goal_markers, "goals")
-        self._capture_after_marker(text, lowered, fact_markers, "facts")
+        self._capture_after_marker(text, folded, preference_markers, "preferences")
+        self._capture_after_marker(text, folded, goal_markers, "goals")
+        self._capture_after_marker(text, folded, fact_markers, "facts")
 
     def remember_lesson(self, user_input: str, selected_mode: str) -> None:
         if selected_mode not in {"learning", "auto"}:

@@ -39,6 +39,26 @@ VISION_NVIDIA_MODEL = get_env_str("VISION_NVIDIA_MODEL", "nvidia/nemotron-nano-1
 VISION_NVIDIA_API_TOKEN = get_env_str("VISION_NVIDIA_API_TOKEN", NVIDIA_API_TOKEN)
 VISION_NVIDIA_TIMEOUT_SECONDS = get_env_int("VISION_NVIDIA_TIMEOUT_SECONDS", 180)
 
+SPEECH_NVIDIA_BASE_URL = get_env_str("SPEECH_NVIDIA_BASE_URL", "https://integrate.api.nvidia.com/v1")
+SPEECH_NVIDIA_MODEL = get_env_str("SPEECH_NVIDIA_MODEL", "nvidia/parakeet-1.1b-rnnt-multilingual-asr")
+SPEECH_NVIDIA_API_TOKEN = get_env_str("SPEECH_NVIDIA_API_TOKEN", NVIDIA_API_TOKEN)
+SPEECH_NVIDIA_SERVER = get_env_str("SPEECH_NVIDIA_SERVER", "grpc.nvcf.nvidia.com:443")
+SPEECH_NVIDIA_FUNCTION_ID = get_env_str("SPEECH_NVIDIA_FUNCTION_ID", "71203149-d3b7-4460-8231-1be2543a1fca")
+SPEECH_NVIDIA_USE_SSL = get_env_bool("SPEECH_NVIDIA_USE_SSL", True)
+SPEECH_NVIDIA_TIMEOUT_SECONDS = get_env_int("SPEECH_NVIDIA_TIMEOUT_SECONDS", 180)
+SPEECH_NVIDIA_LANGUAGE = get_env_str("SPEECH_NVIDIA_LANGUAGE", "cs-CZ")
+
+TTS_NVIDIA_MODEL = get_env_str("TTS_NVIDIA_MODEL", "nvidia/magpie-tts-multilingual")
+TTS_NVIDIA_API_TOKEN = get_env_str("TTS_NVIDIA_API_TOKEN", NVIDIA_API_TOKEN)
+TTS_NVIDIA_SERVER = get_env_str("TTS_NVIDIA_SERVER", "grpc.nvcf.nvidia.com:443")
+TTS_NVIDIA_FUNCTION_ID = get_env_str("TTS_NVIDIA_FUNCTION_ID", "877104f7-e885-42b9-8de8-f6e4c6303969")
+TTS_NVIDIA_USE_SSL = get_env_bool("TTS_NVIDIA_USE_SSL", True)
+TTS_NVIDIA_TIMEOUT_SECONDS = get_env_int("TTS_NVIDIA_TIMEOUT_SECONDS", 180)
+TTS_NVIDIA_LANGUAGE = get_env_str("TTS_NVIDIA_LANGUAGE", "en-US")
+TTS_NVIDIA_VOICE = get_env_str("TTS_NVIDIA_VOICE", "Magpie-Multilingual.EN-US.Aria")
+TTS_NVIDIA_SAMPLE_RATE = get_env_int("TTS_NVIDIA_SAMPLE_RATE", 22050)
+TTS_OUTPUT_DIR = get_env_str("TTS_OUTPUT_DIR", "data/audio/tts")
+
 INTERNET_ENABLED = get_env_bool("LUNA_INTERNET_ENABLED", True)
 INTERNET_MODE = get_env_str("LUNA_INTERNET_MODE", "auto")
 
@@ -75,6 +95,24 @@ class AppSettings:
     vision_nvidia_model: str = VISION_NVIDIA_MODEL
     vision_nvidia_api_token: str = VISION_NVIDIA_API_TOKEN
     vision_nvidia_timeout_seconds: int = VISION_NVIDIA_TIMEOUT_SECONDS
+    speech_nvidia_base_url: str = SPEECH_NVIDIA_BASE_URL
+    speech_nvidia_model: str = SPEECH_NVIDIA_MODEL
+    speech_nvidia_api_token: str = SPEECH_NVIDIA_API_TOKEN
+    speech_nvidia_server: str = SPEECH_NVIDIA_SERVER
+    speech_nvidia_function_id: str = SPEECH_NVIDIA_FUNCTION_ID
+    speech_nvidia_use_ssl: bool = SPEECH_NVIDIA_USE_SSL
+    speech_nvidia_timeout_seconds: int = SPEECH_NVIDIA_TIMEOUT_SECONDS
+    speech_nvidia_language: str = SPEECH_NVIDIA_LANGUAGE
+    tts_nvidia_model: str = TTS_NVIDIA_MODEL
+    tts_nvidia_api_token: str = TTS_NVIDIA_API_TOKEN
+    tts_nvidia_server: str = TTS_NVIDIA_SERVER
+    tts_nvidia_function_id: str = TTS_NVIDIA_FUNCTION_ID
+    tts_nvidia_use_ssl: bool = TTS_NVIDIA_USE_SSL
+    tts_nvidia_timeout_seconds: int = TTS_NVIDIA_TIMEOUT_SECONDS
+    tts_nvidia_language: str = TTS_NVIDIA_LANGUAGE
+    tts_nvidia_voice: str = TTS_NVIDIA_VOICE
+    tts_nvidia_sample_rate: int = TTS_NVIDIA_SAMPLE_RATE
+    tts_output_dir: str = TTS_OUTPUT_DIR
     internet_enabled: bool = INTERNET_ENABLED
     internet_mode: str = INTERNET_MODE
 
@@ -84,6 +122,7 @@ class AppSettings:
         Path(self.user_settings_path).parent.mkdir(parents=True, exist_ok=True)
         Path(self.projects_path).parent.mkdir(parents=True, exist_ok=True)
         Path(self.library_path).parent.mkdir(parents=True, exist_ok=True)
+        Path(self.tts_output_dir).mkdir(parents=True, exist_ok=True)
 
 
 __all__ = [
@@ -118,6 +157,24 @@ __all__ = [
     "VISION_NVIDIA_MODEL",
     "VISION_NVIDIA_API_TOKEN",
     "VISION_NVIDIA_TIMEOUT_SECONDS",
+    "SPEECH_NVIDIA_BASE_URL",
+    "SPEECH_NVIDIA_MODEL",
+    "SPEECH_NVIDIA_API_TOKEN",
+    "SPEECH_NVIDIA_SERVER",
+    "SPEECH_NVIDIA_FUNCTION_ID",
+    "SPEECH_NVIDIA_USE_SSL",
+    "SPEECH_NVIDIA_TIMEOUT_SECONDS",
+    "SPEECH_NVIDIA_LANGUAGE",
+    "TTS_NVIDIA_MODEL",
+    "TTS_NVIDIA_API_TOKEN",
+    "TTS_NVIDIA_SERVER",
+    "TTS_NVIDIA_FUNCTION_ID",
+    "TTS_NVIDIA_USE_SSL",
+    "TTS_NVIDIA_TIMEOUT_SECONDS",
+    "TTS_NVIDIA_LANGUAGE",
+    "TTS_NVIDIA_VOICE",
+    "TTS_NVIDIA_SAMPLE_RATE",
+    "TTS_OUTPUT_DIR",
     "INTERNET_ENABLED",
     "INTERNET_MODE",
 ]

@@ -38,6 +38,9 @@ contextBridge.exposeInMainWorld('lunaDesktop', {
   },
   actionEngine: {
     execute: (payload) => ipcRenderer.invoke('action-engine:execute', payload),
+    getPending: () => ipcRenderer.invoke('action-engine:get-pending'),
+    confirmPending: () => ipcRenderer.invoke('action-engine:confirm-pending'),
+    cancelPending: () => ipcRenderer.invoke('action-engine:cancel-pending'),
     onInternalAction: (handler) => {
       if (typeof handler !== 'function') {
         return () => {};
@@ -58,6 +61,8 @@ contextBridge.exposeInMainWorld('lunaDesktop', {
     sendMessage: (payload) => ipcRenderer.invoke('luna:send-message', payload),
     observeDesktop: (payload) => ipcRenderer.invoke('luna:observe-desktop', payload),
     analyzeVisual: (payload) => ipcRenderer.invoke('luna:analyze-visual', payload),
+    transcribeAudio: (payload) => ipcRenderer.invoke('luna:transcribe-audio', payload),
+    synthesizeSpeech: (payload) => ipcRenderer.invoke('luna:synthesize-speech', payload),
     setObserveMode: (enabled) => ipcRenderer.invoke('luna:set-observe-mode', enabled),
     confirmPendingAction: () => ipcRenderer.invoke('luna:confirm-pending-action'),
     cancelPendingAction: () => ipcRenderer.invoke('luna:cancel-pending-action'),

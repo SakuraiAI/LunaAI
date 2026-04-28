@@ -11,5 +11,20 @@ export function registerActionIpc({ ipcMain, getMainWindow }) {
     return actionEngine.execute(payload.action, payload.context || {});
   });
 
+  ipcMain.handle('action-engine:get-pending', async () => {
+    return {
+      ok: true,
+      pendingAction: actionEngine.getPendingAction(),
+    };
+  });
+
+  ipcMain.handle('action-engine:confirm-pending', async () => {
+    return actionEngine.confirmPendingAction();
+  });
+
+  ipcMain.handle('action-engine:cancel-pending', async () => {
+    return actionEngine.cancelPendingAction();
+  });
+
   return actionEngine;
 }

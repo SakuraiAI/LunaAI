@@ -18,6 +18,8 @@ const SAFE_INTERNAL_ACTIONS = {
 
 const CONFIRM_SYSTEM_ACTIONS = new Set([
   'open_app',
+  'open_url',
+  'open_path',
   'focus_window',
   'type_text',
   'mouse_click',
