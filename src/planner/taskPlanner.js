@@ -55,12 +55,7 @@ export function createTaskPlanner() {
         }
       } else if (tags.includes('system_settings')) {
         draftPlan.summaryParts.push('Rozpoznana systemova nastaveni.');
-        draftPlan.action = {
-          type: 'open_app',
-          target: 'vscode',
-          args: {},
-          requiresConfirmation: true,
-        };
+        draftPlan.summaryParts.push('Systemovou aplikaci neoteviram ze samotneho vision kontextu bez jasneho prikazu uzivatele.');
       } else {
         draftPlan.summaryParts.push('Zatim nevidim jasny bezpecny krok pro automatickou akci.');
       }

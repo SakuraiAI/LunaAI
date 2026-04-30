@@ -962,21 +962,93 @@ Open `index.html` in a browser to preview it.
             return f"https://{url}"
         return url
 
+    def _process_name_for_pid(self, process_id: int) -> str:
+        if os.name != "nt" or not process_id:
+            return ""
+        PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+        handle = ctypes.windll.kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, int(process_id))
+        if not handle:
+            return ""
+        try:
+            size = ctypes.c_ulong(32768)
+            buffer = ctypes.create_unicode_buffer(size.value)
+            ok = ctypes.windll.kernel32.QueryFullProcessImageNameW(handle, 0, buffer, ctypes.byref(size))
+            if not ok:
+                return ""
+            return Path(buffer.value).name
+        finally:
+            ctypes.windll.kernel32.CloseHandle(handle)
+
+    def _focus_window_by_process_names(self, process_names: set[str], *, timeout_seconds: float = 2.5) -> bool:
+        if os.name != "nt":
+            return False
+
+        expected = {name.strip().lower() for name in process_names if name.strip()}
+        if not expected:
+            return False
+
+        user32 = ctypes.windll.user32
+        end_at = time.time() + max(0.2, timeout_seconds)
+        SW_RESTORE = 9
+
+        while time.time() < end_at:
+            matches: list[int] = []
+
+            @ctypes.WINFUNCTYPE(ctypes.c_bool, ctypes.c_void_p, ctypes.c_void_p)
+            def enum_proc(hwnd: int, _lparam: int) -> bool:
+                if not user32.IsWindowVisible(hwnd):
+                    return True
+                length = user32.GetWindowTextLengthW(hwnd)
+                if length <= 0:
+                    return True
+                pid = ctypes.c_ulong()
+                user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+                process_name = self._process_name_for_pid(int(pid.value)).lower()
+                if process_name in expected:
+                    matches.append(int(hwnd))
+                return True
+
+            user32.EnumWindows(enum_proc, 0)
+
+            for hwnd in matches:
+                user32.ShowWindow(hwnd, SW_RESTORE)
+                user32.BringWindowToTop(hwnd)
+                if user32.SetForegroundWindow(hwnd):
+                    return True
+                if int(user32.GetForegroundWindow()) == hwnd:
+                    return True
+
+            time.sleep(0.15)
+
+        return False
+
     def open_url(self, url: str, *, prefer_chrome: bool = False) -> dict[str, str | bool]:
         normalized_url = self._normalize_url(url)
         chrome_path = self._find_chrome_path() if prefer_chrome else None
         if chrome_path is not None:
             subprocess.Popen([str(chrome_path), normalized_url])
+            focused = self._focus_window_by_process_names({"chrome.exe"}, timeout_seconds=3.0)
         else:
             os.startfile(normalized_url)
-        return self._result(
+            focused = self._focus_window_by_process_names(
+                {"chrome.exe", "msedge.exe", "firefox.exe", "opera.exe", "brave.exe"},
+                timeout_seconds=3.0,
+            )
+        focus_detail = "Browser window focused." if focused else "Browser launch requested, but foreground focus was not confirmed."
+        result = self._result(
             ok=True,
             status="completed",
             message=f"Otevřela jsem {normalized_url}.",
-            detail=f"URL opened: {normalized_url}",
+            detail=f"URL opened: {normalized_url}. {focus_detail}",
             category="app_launch",
             action_key="open_url",
         )
+        result["message"] = (
+            f"Otevřela jsem {normalized_url}."
+            if focused
+            else f"Otevřela jsem {normalized_url}, ale nepodařilo se mi potvrdit, že je okno nahoře."
+        )
+        return result
 
     def search_web(self, query: str, *, prefer_chrome: bool = False) -> dict[str, str | bool]:
         cleaned_query = str(query or "").strip()
@@ -1104,6 +1176,7 @@ Open `index.html` in a browser to preview it.
         if not vscode_path.strip():
             return self.open_path(resolved)
         subprocess.Popen([*self._vscode_command(vscode_path), "--reuse-window", str(resolved)])
+        self._focus_window_by_process_names({"Code.exe"}, timeout_seconds=3.0)
         return f"Opened {resolved} in VS Code"
 
     def open_web_folder_in_vscode(self, vscode_path: str, web_folder: Path) -> str:
@@ -1121,6 +1194,7 @@ Open `index.html` in a browser to preview it.
         if index_file.exists():
             targets.append(str(index_file))
         subprocess.Popen([*self._vscode_command(vscode_path), "--reuse-window", *targets])
+        self._focus_window_by_process_names({"Code.exe"}, timeout_seconds=3.0)
         if index_file.exists():
             return f"Opened {resolved} and index.html in VS Code"
         return f"Opened {resolved} in VS Code"

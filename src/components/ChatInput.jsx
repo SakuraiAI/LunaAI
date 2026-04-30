@@ -35,6 +35,7 @@ export default function ChatInput({
   micRecording = false,
   voiceLoopEnabled = false,
   voiceSpeaking = false,
+  assistantModeEnabled = false,
   centered = false,
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
@@ -123,12 +124,16 @@ export default function ChatInput({
         </button>
         {menuOpen && (
           <div className="chat-plus-menu">
+            <button
+              type="button"
+              className={assistantModeEnabled ? 'is-active' : ''}
+              onClick={() => { onAction('assistant-mode'); setMenuOpen(false); }}
+            >
+              {assistantModeEnabled ? 'Stop assistant mode' : 'Assistant mode'}
+            </button>
             <button type="button" onClick={() => fileInputRef.current?.click()}>Add file</button>
             <button type="button" onClick={() => { onAction('share-screen'); setMenuOpen(false); }}>
               {screenShare?.active ? 'Restart desktop share' : 'Share desktop'}
-            </button>
-            <button type="button" onClick={() => { onAction('speak'); setMenuOpen(false); }}>
-              Read aloud once
             </button>
             <button type="button" onClick={handleGenerateImage}>Generate image</button>
           </div>

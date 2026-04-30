@@ -27,7 +27,7 @@ export default function VoiceSessionOverlay({
         : 'Voice loop is ready';
 
   const detail = speaking
-    ? 'Wait a moment. When Luna finishes, listening starts again automatically.'
+    ? 'Click Interrupt if you want to jump in. Otherwise Luna will continue and listen again after speaking.'
     : listening
       ? 'Speak naturally. When you stop talking, Luna will send it automatically.'
       : thinking
@@ -54,7 +54,7 @@ export default function VoiceSessionOverlay({
         </div>
         <div className="voice-session-actions">
           <button className="secondary-button voice-session-talk" type="button" onClick={onToggleListen}>
-            {listening ? 'Stop & send' : 'Talk'}
+            {speaking ? 'Interrupt' : listening ? 'Stop & send' : 'Talk'}
           </button>
           <button className="ghost-action voice-session-end" type="button" onClick={onClose}>
             End voice

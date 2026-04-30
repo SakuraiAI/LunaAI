@@ -71,6 +71,54 @@ const defaultRuntimeSettings = {
 
 const screenShareFrameIntervalMs = 1000;
 const screenShareVisionIntervalMs = 1000;
+const spokenTextLimit = 720;
+
+function detectSpeechLanguage(text) {
+  // NVIDIA Magpie currently sounds more stable when the language follows the configured voice.
+  // Forcing cs-CZ on an English voice makes Czech speech noticeably robotic.
+  void text;
+  return 'en-US';
+}
+
+function shapeTextForSpeech(text) {
+  let value = normalizeTransportText(text || '')
+    .replace(/\[Model debug\][\s\S]*$/i, '')
+    .replace(/```[\s\S]*?```/g, 'Kód přeskočím, ať se to dobře poslouchá.')
+    .replace(/`([^`]+)`/g, '$1')
+    .replace(/\*\*([^*]+)\*\*/g, '$1')
+    .replace(/\*([^*]+)\*/g, '$1')
+    .replace(/#{1,6}\s*/g, '')
+    .replace(/\[(.*?)\]\((.*?)\)/g, '$1')
+    .replace(/https?:\/\/\S+/gi, 'odkaz')
+    .replace(/^\s*(Luna|Xeno)\s*:\s*/i, '')
+    .replace(/\s+(Luna|Xeno)\s*:\s*/gi, ' ')
+    .replace(/[•*_>#~|]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  if (!value) return '';
+
+  if (value.length > spokenTextLimit) {
+    const sentences = value.match(/[^.!?…]+[.!?…]+/g) || [];
+    const compact = [];
+    let total = 0;
+    for (const sentence of sentences) {
+      const next = sentence.trim();
+      if (!next) continue;
+      if (total + next.length > spokenTextLimit) break;
+      compact.push(next);
+      total += next.length + 1;
+      if (compact.length >= 4) break;
+    }
+    value = compact.length ? compact.join(' ') : `${value.slice(0, spokenTextLimit).trim()}...`;
+  }
+
+  return value
+    .replace(/\s*([.!?…])\s*/g, '$1 ')
+    .replace(/\s*,\s*/g, ', ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
 
 function normalizeIntentText(value) {
   return normalizeTransportText(value || '')
@@ -80,6 +128,36 @@ function normalizeIntentText(value) {
     .replace(/[^a-z0-9]+/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();
+}
+
+function shouldForceVoiceActionExecution(value) {
+  const text = normalizeIntentText(value);
+  if (!text) return false;
+
+  const destructiveSignals = [
+    'smaz',
+    'vymaz',
+    'delete',
+    'remove',
+    'klik',
+    'click',
+    'napis',
+    'type',
+    'prepis',
+    'overwrite',
+    'append',
+  ];
+  if (destructiveSignals.some((signal) => text.includes(signal))) {
+    return false;
+  }
+
+  return /^(otevri|otevrit|open|spust|spustit|start|launch|zapni|zapnout|run)\b/.test(text);
+}
+
+function wait(ms) {
+  return new Promise((resolve) => {
+    window.setTimeout(resolve, ms);
+  });
 }
 
 function isStartDesktopShareIntent(value) {
@@ -476,6 +554,7 @@ export default function App() {
   const [micRecording, setMicRecording] = useState(false);
   const [speechPlaying, setSpeechPlaying] = useState(false);
   const [voiceLoopEnabled, setVoiceLoopEnabled] = useState(false);
+  const [assistantModeEnabled, setAssistantModeEnabled] = useState(false);
   const [thinkingState, setThinkingState] = useState(idleThinkingState);
   const [revealingMessage, setRevealingMessage] = useState(null);
   const [pendingAction, setPendingAction] = useState({ active: false, title: '' });
@@ -843,7 +922,7 @@ export default function App() {
     screenShareAnalysisBusyRef.current = false;
     screenShareLastAnalyzedAtRef.current = 0;
     resetShareAutomationState();
-    setScreenShare({
+    const stoppedShareState = {
       active: false,
       label: '',
       stream: null,
@@ -856,7 +935,9 @@ export default function App() {
       analyzing: false,
       frameCount: 0,
       lastFrameAt: 0,
-    });
+    };
+    screenShareStateRef.current = stoppedShareState;
+    setScreenShare(stoppedShareState);
     if (message) {
       setStatus(message);
     }
@@ -889,12 +970,84 @@ export default function App() {
     };
   }
 
+  async function waitForSharedVideoFrame(video, timeoutMs = 900) {
+    if (!video) return false;
+    if (video.videoWidth > 0 && video.videoHeight > 0 && video.readyState >= 2) {
+      return true;
+    }
+
+    await video.play?.().catch(() => {});
+
+    return new Promise((resolve) => {
+      let settled = false;
+      const finish = () => {
+        if (settled) return;
+        settled = true;
+        video.removeEventListener('loadedmetadata', finish);
+        video.removeEventListener('loadeddata', finish);
+        video.removeEventListener('playing', finish);
+        window.clearTimeout(timer);
+        resolve(video.videoWidth > 0 && video.videoHeight > 0);
+      };
+      const timer = window.setTimeout(finish, timeoutMs);
+
+      video.addEventListener('loadedmetadata', finish, { once: true });
+      video.addEventListener('loadeddata', finish, { once: true });
+      video.addEventListener('playing', finish, { once: true });
+      if (typeof video.requestVideoFrameCallback === 'function') {
+        video.requestVideoFrameCallback(finish);
+      }
+    });
+  }
+
+  async function persistScreenShareDataUrl(dataUrl, { status = '' } = {}) {
+    const api = window.lunaDesktop?.files;
+    const value = String(dataUrl || '').trim();
+    if (!api?.writeTempDataUrl || !value.startsWith('data:image/')) {
+      return '';
+    }
+
+    const result = await api.writeTempDataUrl({
+      dataUrl: value,
+      extension: value.startsWith('data:image/webp') ? 'webp' : (value.startsWith('data:image/png') ? 'png' : 'jpg'),
+      previousPath: latestScreenSharePathRef.current,
+    }).catch(() => null);
+
+    if (!result?.ok || !result?.path) {
+      return '';
+    }
+
+    const nextPath = String(result.path);
+    const nextFrameAt = Date.now();
+    latestScreenSharePathRef.current = nextPath;
+    const nextStatus = status || 'Desktop share je aktivní. Luna a Xeno mají uložený poslední dostupný frame.';
+
+    setScreenShare((current) => ({
+      ...current,
+      active: true,
+      previewUrl: value,
+      framePath: nextPath,
+      status: nextStatus,
+      lastFrameAt: nextFrameAt,
+    }));
+    screenShareStateRef.current = {
+      ...screenShareStateRef.current,
+      active: true,
+      previewUrl: value,
+      framePath: nextPath,
+      status: nextStatus,
+      lastFrameAt: nextFrameAt,
+    };
+    return nextPath;
+  }
+
   async function captureSharedDesktopFrame() {
     const currentStream = screenShareStreamRef.current;
     const api = window.lunaDesktop?.files;
     if (!currentStream || !api?.writeTempDataUrl) return '';
 
     const { video, canvas } = ensureScreenShareNodes();
+    await waitForSharedVideoFrame(video);
     if (!video.videoWidth || !video.videoHeight) {
       return '';
     }
@@ -908,29 +1061,55 @@ export default function App() {
     if (!context) return '';
 
     context.drawImage(video, 0, 0, canvas.width, canvas.height);
-    const dataUrl = canvas.toDataURL('image/png');
-    const result = await api.writeTempDataUrl({
-      dataUrl,
-      extension: 'png',
-      previousPath: latestScreenSharePathRef.current,
-    }).catch(() => null);
-
-    if (!result?.ok || !result?.path) {
-      return '';
-    }
-
-    latestScreenSharePathRef.current = String(result.path);
+    const dataUrl = canvas.toDataURL('image/jpeg', 0.78);
+    const savedPath = await persistScreenShareDataUrl(dataUrl, {
+      status: 'Desktop share je aktivní. Luna a Xeno čtou průběžně obnovované framy ze sdílené obrazovky.',
+    });
+    if (!savedPath) return '';
     setScreenShare((current) => ({
       ...current,
       active: true,
       stream: current.stream,
       previewUrl: dataUrl,
-      framePath: String(result.path),
+      framePath: savedPath,
       status: 'Desktop share je aktivní. Luna a Xeno čtou průběžně obnovované framy ze sdílené obrazovky.',
       frameCount: Number(current.frameCount || 0) + 1,
       lastFrameAt: Date.now(),
     }));
-    return String(result.path);
+    screenShareStateRef.current = {
+      ...screenShareStateRef.current,
+      active: true,
+      previewUrl: dataUrl,
+      framePath: savedPath,
+      frameCount: Number(screenShareStateRef.current?.frameCount || 0) + 1,
+      lastFrameAt: Date.now(),
+    };
+    return savedPath;
+  }
+
+  async function ensureLatestSharedFrameForMessage() {
+    const currentShare = screenShareStateRef.current || screenShare;
+    let framePath = await captureSharedDesktopFrame();
+    if (framePath) return framePath;
+
+    await wait(160);
+    framePath = await captureSharedDesktopFrame();
+    if (framePath) return framePath;
+
+    const fallbackPath = latestScreenSharePathRef.current
+      || currentShare?.framePath
+      || screenShare.framePath
+      || '';
+    const fallbackFrameAt = Number(currentShare?.lastFrameAt || screenShare.lastFrameAt || 0);
+    const fallbackIsFresh = fallbackFrameAt > 0 && (Date.now() - fallbackFrameAt < 15000);
+    if (fallbackPath && fallbackIsFresh) {
+      return fallbackPath;
+    }
+
+    const previewUrl = currentShare?.previewUrl || screenShare.previewUrl || '';
+    return persistScreenShareDataUrl(previewUrl, {
+      status: 'Desktop share je aktivní. Používám poslední dostupný náhled jako frame pro AI.',
+    });
   }
 
   async function executeSharePlan({ framePath, visionSummary }) {
@@ -1120,7 +1299,7 @@ export default function App() {
       await video.play().catch(() => {});
 
       screenShareStreamRef.current = stream;
-      setScreenShare({
+      const startedShareState = {
         active: true,
         label: track.label || 'Desktop share',
         stream,
@@ -1133,7 +1312,9 @@ export default function App() {
         analyzing: false,
         frameCount: 0,
         lastFrameAt: 0,
-      });
+      };
+      screenShareStateRef.current = startedShareState;
+      setScreenShare(startedShareState);
 
       const firstFramePath = await captureSharedDesktopFrame();
       if (firstFramePath) {
@@ -1364,6 +1545,55 @@ export default function App() {
     }
   }
 
+  async function startAssistantMode() {
+    setAssistantModeEnabled(true);
+    setPage('chat');
+    setStatus('Assistant mode se zapina: voice, vision a agent se spojuji do jednoho rezimu.');
+    await window.lunaDesktop?.window?.showAssistantOverlay?.();
+
+    if (!observeModeEnabled) {
+      await updateObserveMode(true, { silent: true });
+    }
+
+    if (!voiceLoopRef.current) {
+      voiceLoopRef.current = true;
+      setVoiceLoopEnabled(true);
+      if (!micSessionRef.current) {
+        window.setTimeout(() => startMicrophoneCapture(), 0);
+      }
+    }
+
+    if (!screenShareStateRef.current?.active) {
+      await refreshScreenShareSources();
+      setStatus('Assistant mode bezi. Vyber obrazovku nebo okno, ktere maji Luna a Xeno sledovat.');
+    } else {
+      setStatus('Assistant mode bezi. Luna posloucha, Xeno drzi plan a vision cte sdilenou obrazovku.');
+    }
+  }
+
+  async function stopAssistantMode() {
+    setAssistantModeEnabled(false);
+    await window.lunaDesktop?.window?.hideAssistantOverlay?.();
+    voiceLoopRef.current = false;
+    setVoiceLoopEnabled(false);
+    if (micSessionRef.current) {
+      window.setTimeout(() => stopMicrophoneCapture(), 0);
+    }
+    stopSpeechPlayback();
+    if (observeModeEnabled) {
+      await updateObserveMode(false, { silent: true });
+    }
+    setStatus('Assistant mode vypnuty. Luna zustava v beznem chat rezimu.');
+  }
+
+  function toggleAssistantMode() {
+    if (assistantModeEnabled) {
+      stopAssistantMode();
+    } else {
+      startAssistantMode();
+    }
+  }
+
   useEffect(() => () => {
     clearRevealTimer();
     revealActiveRef.current = false;
@@ -1533,8 +1763,9 @@ export default function App() {
     return chatId;
   }
 
-  async function handleSend(overrideText = '') {
+  async function handleSend(overrideText = '', options = {}) {
     const safeOverrideText = typeof overrideText === 'string' ? overrideText : '';
+    const sendOptions = options && typeof options === 'object' ? options : {};
     const text = normalizeTransportText(safeOverrideText || composer).trim();
     if ((!text && !attachment?.name) || chatBusy) return;
 
@@ -1573,15 +1804,24 @@ export default function App() {
       return;
     }
 
-    if (screenShare.active) {
-      latestSharedFramePath = await captureSharedDesktopFrame();
-      const shareFrameIsFresh = Number(screenShare.lastFrameAt || 0) > 0
-        && (Date.now() - Number(screenShare.lastFrameAt || 0) < 2500);
-      if (!latestSharedFramePath && shareFrameIsFresh) {
-        latestSharedFramePath = screenShare.framePath || '';
+    const currentShareState = screenShareStateRef.current || screenShare;
+    const shareIsActive = Boolean(currentShareState?.active || screenShareStreamRef.current);
+    if (shareIsActive) {
+      latestSharedFramePath = await ensureLatestSharedFrameForMessage();
+      const fallbackFramePath = latestScreenSharePathRef.current
+        || currentShareState?.framePath
+        || screenShare.framePath
+        || '';
+      const shareFrameIsFresh = Number(currentShareState?.lastFrameAt || screenShare.lastFrameAt || 0) > 0
+        && (Date.now() - Number(currentShareState?.lastFrameAt || screenShare.lastFrameAt || 0) < 5000);
+      if (!latestSharedFramePath && (fallbackFramePath || shareFrameIsFresh)) {
+        latestSharedFramePath = fallbackFramePath;
       }
       if (latestSharedFramePath) {
         latestSharedFrameSummary = await refreshScreenShareVisionSummary(latestSharedFramePath, { force: true });
+        if (!latestSharedFrameSummary) {
+          latestSharedFrameSummary = currentShareState?.visionSummary || screenShare.visionSummary || '';
+        }
       }
     }
 
@@ -1590,9 +1830,12 @@ export default function App() {
       ...(latestSharedFramePath ? [latestSharedFramePath] : []),
     ];
     const extraContext = [
+      sendOptions.source === 'voice'
+        ? 'Input source: voice. Voice mode: user is speaking conversationally. Reply naturally for speech output.'
+        : '',
       String(pendingDesktopContext?.context || '').trim(),
-      latestSharedFramePath
-        ? `Active desktop share: ${screenShare.label || 'desktop stream'}. The newest shared frame attached to this message is the current on-screen truth. It overrides any older screenshots or older screen descriptions in this chat. Answer from this newest frame, not from earlier messages. Do not say you only see an old attachment while desktop share is active.`
+      shareIsActive
+        ? `Active desktop share: ${currentShareState?.label || screenShare.label || 'desktop stream'}. ${latestSharedFramePath ? 'The newest shared frame attached to this message is the current on-screen truth.' : 'The share preview is live, but no frame file was available for this exact message yet.'} It overrides any older screenshots or older screen descriptions in this chat. Answer from the newest shared frame when a frame is attached; if no frame is attached, say the share preview is active but the current frame was not delivered yet.`
         : '',
       latestSharedFrameSummary
         ? `Current live vision summary from the newest shared frame:\n${latestSharedFrameSummary}`
@@ -1609,6 +1852,7 @@ export default function App() {
           text: decoratedText,
           filePaths,
           extraContext,
+          forceActionExecution: sendOptions.source === 'voice' && shouldForceVoiceActionExecution(baseText),
         });
         if (handleBackendResponseResult(result, 'Luna backend replied.')) {
           // handled above
@@ -1791,6 +2035,10 @@ export default function App() {
       if (action === 'minimize') await api.minimize();
       if (action === 'maximize') await api.maximize();
       if (action === 'close') await api.close();
+      if (action === 'hide-to-tray' && api.hideToTray) {
+        const result = await api.hideToTray();
+        setStatus(result?.message || 'LunaAI is still running in the tray.');
+      }
       return;
     }
 
@@ -2177,7 +2425,7 @@ export default function App() {
       if (voiceLoopRef.current) {
         setComposer('');
         setStatus('Voice loop heard you. Sending it to Luna/Xeno...');
-        await handleSend(transcript);
+        await handleSend(transcript, { source: 'voice' });
         return;
       }
 
@@ -2199,6 +2447,19 @@ export default function App() {
     }
   }
 
+  function handleVoiceSessionTalk() {
+    if (speechPlaying) {
+      stopSpeechPlayback();
+      setStatus('Luna stopped speaking. Listening again...');
+      if (!micSessionRef.current) {
+        window.setTimeout(() => startMicrophoneCapture(), 0);
+      }
+      return;
+    }
+
+    toggleMicrophoneCapture();
+  }
+
   function stopSpeechPlayback() {
     const currentAudio = speechPlaybackRef.current;
     if (currentAudio) {
@@ -2210,6 +2471,8 @@ export default function App() {
   }
 
   function closeVoiceSession() {
+    setAssistantModeEnabled(false);
+    window.lunaDesktop?.window?.hideAssistantOverlay?.();
     voiceLoopRef.current = false;
     setVoiceLoopEnabled(false);
     if (micSessionRef.current) {
@@ -2272,6 +2535,10 @@ export default function App() {
     return '';
   }
 
+  function cleanTextForSpeech(text) {
+    return shapeTextForSpeech(text);
+  }
+
   async function handleTextToSpeech(overrideText = '') {
     if (speechPlaying) {
       stopSpeechPlayback();
@@ -2285,7 +2552,7 @@ export default function App() {
       return;
     }
 
-    const text = getTextForSpeech(overrideText);
+    const text = cleanTextForSpeech(getTextForSpeech(overrideText));
     if (!text) {
       setStatus('Write text first, or keep a Luna/Xeno answer in the chat to read aloud.');
       return;
@@ -2295,7 +2562,7 @@ export default function App() {
       setStatus('Generating voice with NVIDIA Magpie...');
       const result = await lunaApi.synthesizeSpeech({
         text,
-        language: 'en-US',
+        language: detectSpeechLanguage(text),
       });
       if (!result?.ok || !result?.audioPath) {
         setStatus(result?.message || 'Text-to-speech did not return audio.');
@@ -2338,6 +2605,14 @@ export default function App() {
     }
     if (action === 'share-screen') {
       refreshScreenShareSources();
+      return;
+    }
+    if (action === 'assistant-mode') {
+      toggleAssistantMode();
+      return;
+    }
+    if (action === 'hide-to-tray') {
+      handleWindowAction('hide-to-tray');
       return;
     }
     if (action === 'image') {
@@ -2552,6 +2827,7 @@ export default function App() {
             micRecording={micRecording}
             voiceLoopEnabled={voiceLoopEnabled}
             voiceSpeaking={speechPlaying}
+            assistantModeEnabled={assistantModeEnabled}
             centered={isEmptyChat}
           />
         </div>
@@ -2700,7 +2976,7 @@ export default function App() {
         listening={micRecording}
         speaking={speechPlaying}
         thinking={chatBusy || thinkingState.visible}
-        onToggleListen={toggleMicrophoneCapture}
+        onToggleListen={handleVoiceSessionTalk}
         onClose={closeVoiceSession}
       />
     </>

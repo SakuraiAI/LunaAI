@@ -1,0 +1,20 @@
+{
+  "run_id": "8378ff46eac5",
+  "created_at": "2026-04-30T13:42:28",
+  "updated_at": "2026-04-30T13:42:31",
+  "user_input": "co vidíš teď",
+  "input_source": "chat",
+  "owner": "Luna",
+  "scope": "live_vision_answer",
+  "risk": "none",
+  "status": "completed",
+  "vision_active": true,
+  "xeno_active": false,
+  "action_title": "",
+  "tool_name": "",
+  "requires_confirmation": false,
+  "final_message": "Momentálně nemám k dispozici žádný aktuální snímek obrazovky – sdílení je zapnuté, ale poslední frame nebyl doručen.\nPoslední zaznamenaný stav, který jsem viděl, byl otevřený Chrome s přehrávaným videem na YouTube (okno s názvem „Grioten, xlout – ADRENALINA // SPEED UP“). Pokud chcete, pošlete nový snímek nebo aktualizujte sdílení. 🙂",
+  "notes": [
+    "The user is asking about the live screen, so the newest shared frame is the source of truth."
+  ]
+}

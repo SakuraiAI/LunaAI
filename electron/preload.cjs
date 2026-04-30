@@ -5,6 +5,10 @@ contextBridge.exposeInMainWorld('lunaDesktop', {
     minimize: () => ipcRenderer.invoke('window:minimize'),
     maximize: () => ipcRenderer.invoke('window:maximize'),
     close: () => ipcRenderer.invoke('window:close'),
+    hideToTray: () => ipcRenderer.invoke('window:hide-to-tray'),
+    show: () => ipcRenderer.invoke('window:show'),
+    showAssistantOverlay: () => ipcRenderer.invoke('window:show-assistant-overlay'),
+    hideAssistantOverlay: () => ipcRenderer.invoke('window:hide-assistant-overlay'),
   },
   app: {
     getMeta: () => ipcRenderer.invoke('app:get-meta'),

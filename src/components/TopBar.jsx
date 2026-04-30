@@ -7,7 +7,15 @@ function BellIcon() {
   );
 }
 
-export default function TopBar({ collapsed, onToggleSidebar, profileName, onOpenProfile, onOpenNotifications, notificationCount, onWindowAction }) {
+export default function TopBar({
+  collapsed,
+  onToggleSidebar,
+  profileName,
+  onOpenProfile,
+  onOpenNotifications,
+  notificationCount,
+  onWindowAction,
+}) {
   return (
     <header className="topbar app-drag-region">
       <div className="topbar-left">

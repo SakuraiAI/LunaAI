@@ -9,6 +9,11 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from config.settings import AppSettings
 from app.core.action_log import ActionLogStore
+from app.core.agent_action_router import AgentActionRouter, AgentRoute
+from app.core.agent_run_state import AgentRunStateStore
+from app.core.agent_tool_registry import AgentToolRegistry, ToolSpec
+from app.core.agent_trace import AgentTraceStore
+from app.core.agent_orchestrator import AgentOrchestrator
 from app.core.library_store import LibraryStore
 from app.core.memory_coordinator import MemoryCoordinator
 from app.core.system_control import SystemControlLayer
@@ -98,10 +103,16 @@ class LunaEngine:
         self.projects = ProjectStore(Path(self.settings.projects_path))
         self.library = LibraryStore(Path(self.settings.library_path))
         self.action_log = ActionLogStore(Path("data/logs/action_log.jsonl"))
+        self.agent_trace = AgentTraceStore(Path("data/logs/agent_trace.jsonl"))
+        self.agent_run_state = AgentRunStateStore(Path("data/logs/agent_run_state.json"))
         self.system_control = SystemControlLayer()
         self.system_control.apply_profile(self.user_settings.data, self.user_settings.data.system_control_profile)
+        self.orchestrator = AgentOrchestrator()
+        self.agent_router = AgentActionRouter()
+        self.tool_registry = AgentToolRegistry()
         self.pending_action: tuple[str, str, Callable[[], object]] | None = None
         self.pending_action_plan: dict[str, object] | None = None
+        self._active_agent_route: AgentRoute | None = None
         self._action_mode_override: str | None = None
         self.observe_mode_enabled = False
         self.last_desktop_observation: dict[str, object] | None = None
@@ -549,6 +560,75 @@ class LunaEngine:
     def _log_action(self, category: str, title: str, status: str, detail: str) -> None:
         self.action_log.record(category=category, title=title, status=status, detail=detail)
 
+    def _trace_agent(
+        self,
+        *,
+        phase: str,
+        status: str,
+        detail: str = "",
+        metadata: dict[str, object] | None = None,
+    ) -> None:
+        route = self._active_agent_route
+        self.agent_trace.record(
+            phase=phase,
+            status=status,
+            source=route.input_source if route is not None else "unknown",
+            scope=route.action_scope if route is not None else "unknown",
+            risk=route.risk if route is not None else "none",
+            vision_active=bool(route.vision_active) if route is not None else False,
+            xeno_active=bool(route.consult_xeno) if route is not None else False,
+            detail=detail,
+            metadata=metadata,
+        )
+
+    def list_recent_agent_trace(self, limit: int = 8) -> list[dict[str, object]]:
+        return [
+            {
+                "timestamp": entry.timestamp,
+                "phase": entry.phase,
+                "status": entry.status,
+                "source": entry.source,
+                "scope": entry.scope,
+                "risk": entry.risk,
+                "visionActive": entry.vision_active,
+                "xenoActive": entry.xeno_active,
+                "detail": entry.detail,
+                "metadata": entry.metadata,
+            }
+            for entry in self.agent_trace.recent(limit)
+        ]
+
+    def format_agent_trace_status(self, limit: int = 8) -> str:
+        route = self._active_agent_route
+        current = "No active route right now."
+        if route is not None:
+            current = (
+                f"Current route: source={route.input_source}, scope={route.action_scope}, "
+                f"risk={route.risk}, vision={'yes' if route.vision_active else 'no'}, "
+                f"xeno={'yes' if route.consult_xeno else 'no'}."
+            )
+        return current + "\n\n" + self.agent_trace.format_recent(limit)
+
+    def _tool_for_action(self, category: str, title: str) -> ToolSpec | None:
+        route = self._active_agent_route
+        return self.tool_registry.match(
+            category=category,
+            title=title,
+            user_input=route.user_input if route is not None else title,
+        )
+
+    def list_agent_tools(self) -> list[dict[str, object]]:
+        return self.tool_registry.to_bridge_payload()
+
+    def format_agent_tools_status(self) -> str:
+        return self.tool_registry.format_for_chat()
+
+    def get_agent_run_state(self) -> dict[str, object]:
+        return self.agent_run_state.to_payload()
+
+    def format_agent_run_state(self) -> str:
+        return self.agent_run_state.format_current()
+
     def _configured_connected_apps(self) -> list[str]:
         workspace = self.user_settings.data
         app_fields = OrderedDict([
@@ -585,8 +665,11 @@ class LunaEngine:
             lines.append("Connected apps: " + ", ".join(connected_apps))
         else:
             lines.append("Connected apps: none yet")
+        lines.append("Registered agent tools: " + ", ".join(self.tool_registry.names()))
         lines.extend([
             "Local actions Luna can handle right now:",
+            "- keep an AIQ-inspired agent trace for route, Xeno checks, actions, and verification",
+            "- keep an OpenAI Agents-inspired run state with owner, tool, approval, and final result",
             "- observe the active desktop window and mouse position",
             "- compare the current desktop with the previous observation",
             "- keep an observe mode baseline for Luna and Xeno",
@@ -597,6 +680,7 @@ class LunaEngine:
             "- find files and folders in bounded local search roots",
             "- open Chrome/browser URLs and web searches",
             "- press keyboard shortcuts, type text, and click exact coordinates after confirmation",
+            "- verify completed actions by observing the desktop state after execution",
             "- create folders and files",
             "- overwrite or append file content",
             "- scaffold python, web, and electron projects",
@@ -728,14 +812,32 @@ class LunaEngine:
         output_dir = Path(self.settings.tts_output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
         output_path = output_dir / f"tts_{self._safe_timestamp_slug()}.wav"
+        requested_language = language or self.settings.tts_nvidia_language
+        requested_voice = voice or self.settings.tts_nvidia_voice
         try:
             audio_path = self.tts_model.synthesize_to_file(
                 cleaned_text,
                 output_path,
-                language=language or self.settings.tts_nvidia_language,
-                voice=voice or self.settings.tts_nvidia_voice,
+                language=requested_language,
+                voice=requested_voice,
             )
         except Exception as error:
+            fallback_language = self.settings.tts_nvidia_language
+            if requested_language and requested_language != fallback_language:
+                try:
+                    audio_path = self.tts_model.synthesize_to_file(
+                        cleaned_text,
+                        output_path,
+                        language=fallback_language,
+                        voice=requested_voice,
+                    )
+                    return {
+                        "ok": True,
+                        "audioPath": str(audio_path),
+                        "message": f"Text-to-speech audio generated with fallback language {fallback_language}.",
+                    }
+                except Exception:
+                    pass
             return {
                 "ok": False,
                 "audioPath": "",
@@ -908,6 +1010,49 @@ class LunaEngine:
 
     def _handle_local_capability_command(self, user_input: str) -> str | None:
         normalized = ascii_fold_text(" ".join(user_input.strip().lower().split()))
+        trace_triggers = {
+            "agent status",
+            "agent trace",
+            "stav agenta",
+            "trace agenta",
+            "jak je na tom agent",
+            "co dela agent",
+            "co dela agent ted",
+            "ukaz agent trace",
+            "ukaz stav agenta",
+        }
+        if normalized in trace_triggers:
+            return self.format_agent_trace_status()
+
+        run_state_triggers = {
+            "agent run",
+            "agent state",
+            "run state",
+            "stav runu",
+            "stav behu",
+            "stav běhu",
+            "co prave dela agent",
+            "co právě dělá agent",
+            "kdo ted vede",
+            "kdo teď vede",
+        }
+        if normalized in run_state_triggers:
+            return self.format_agent_run_state()
+
+        tool_triggers = {
+            "agent tools",
+            "tools",
+            "nastroje",
+            "nastroje agenta",
+            "jake mas tooly",
+            "jake nastroje mas",
+            "ukaz tools",
+            "ukaz nastroje agenta",
+            "vypis tooly",
+        }
+        if normalized in tool_triggers:
+            return self.format_agent_tools_status()
+
         triggers = {
             "co umis na pc",
             "co umis delat na pc",
@@ -993,6 +1138,84 @@ class LunaEngine:
             return f"Luna: Akci jsem zrusila. {detail or message}".strip()
         return f"Luna: {message}".strip()
 
+    def _should_action_loop_verify(self, category: str) -> bool:
+        return str(category or "").strip().lower() not in {"file_read", "observe", "system_control"}
+
+    def _should_action_loop_use_vision(self, category: str) -> bool:
+        return str(category or "").strip().lower() in {"app_launch", "path_open", "project_run", "system_input"}
+
+    def _observe_for_action_loop(self, *, include_screenshot: bool = False) -> dict[str, object] | None:
+        try:
+            return self.desktop_observer.observe(include_screenshot=include_screenshot)
+        except Exception:
+            return None
+
+    def _compact_verification_text(self, value: object, limit: int = 220) -> str:
+        text = repair_text(str(value or "")).strip()
+        text = " ".join(text.split())
+        if len(text) > limit:
+            return text[: limit - 1].rstrip() + "..."
+        return text
+
+    def _attach_action_loop_verification(
+        self,
+        result: dict[str, object],
+        *,
+        category: str,
+        title: str,
+        before: dict[str, object] | None,
+    ) -> dict[str, object]:
+        status = str(result.get("status", "completed")).strip().lower()
+        if status in {"blocked", "failed", "cancelled", "pending"} or not bool(result.get("ok", True)):
+            return result
+        if not self._should_action_loop_verify(category):
+            return result
+
+        if category in {"app_launch", "path_open", "project_run", "system_input"}:
+            time.sleep(0.55)
+
+        include_screenshot = self._should_action_loop_use_vision(category) and self.vision_model.is_available()
+        after = self._observe_for_action_loop(include_screenshot=include_screenshot)
+        if after is None:
+            return result
+
+        diff = self.desktop_observer.diff(before, after) if before else {}
+        self.last_desktop_observation = after
+
+        app_label = self._compact_verification_text(after.get("app_label") or "desktop")
+        activity = self._compact_verification_text(after.get("inferred_activity") or "desktop activity")
+        window_title = self._compact_verification_text(after.get("active_window_title") or "", limit=90)
+        changed = bool(diff.get("changed")) if diff else True
+        change_note = "zmena na plose byla detekovana" if changed else "plocha vypada stabilne"
+        verification = f"Overeni: {change_note}; aktivni je {app_label} ({activity})."
+        if window_title:
+            verification += f" Okno: {window_title}."
+
+        screenshot_path = str(after.get("screenshot_path", "") or "").strip()
+        if screenshot_path:
+            vision_summary = self._analyze_visual_media(
+                [screenshot_path],
+                (
+                    "Verify the result of this desktop action for LunaAI. "
+                    f"Action: {title}. Describe only the current visible result in one short sentence."
+                ),
+            )
+            if vision_summary:
+                after["vision_summary"] = vision_summary
+                verification += " Vision: " + self._compact_verification_text(vision_summary, limit=260)
+
+        result["verification"] = verification
+        message = repair_text(str(result.get("message", "")).strip())
+        detail = repair_text(str(result.get("detail", "")).strip())
+        result["message"] = f"{message} {verification}".strip()
+        result["detail"] = f"{detail}\n\n{verification}".strip() if detail else verification
+        return result
+
+    def _run_action_with_verification(self, category: str, title: str, callback: Callable[[], object]) -> dict[str, object]:
+        before = self._observe_for_action_loop(include_screenshot=False) if self._should_action_loop_verify(category) else None
+        result = self._coerce_action_result(callback(), category=category, title=title)
+        return self._attach_action_loop_verification(result, category=category, title=title, before=before)
+
     def _action_plan_note(self, action_plan: dict[str, object] | None, limit: int = 190) -> str:
         if not action_plan:
             return ""
@@ -1029,6 +1252,21 @@ class LunaEngine:
         }
 
     def _plan_action_with_xeno(self, category: str, title: str) -> dict[str, object]:
+        route = self._active_agent_route
+        tool = self._tool_for_action(category, title)
+        route_note = ""
+        if route is not None:
+            route_note = (
+                f" Agent route: source={route.input_source}, scope={route.action_scope}, "
+                f"risk={route.risk}, vision={'yes' if route.vision_active else 'no'}, "
+                f"auto={'yes' if route.force_auto_execution else 'no'}."
+            )
+        tool_note = ""
+        if tool is not None:
+            tool_note = (
+                f" Tool contract: {tool.name}, risk={tool.risk}, "
+                f"confirmation={'yes' if tool.requires_confirmation else 'no'}."
+            )
         simple_reasons = {
             "app_launch": "Otevření aplikace, URL nebo webového hledání je lokální akce. Spustím ji jen podle nastaveného režimu potvrzení.",
             "path_open": "Otevření cesty nemění soubory, jen zobrazí existující soubor nebo složku.",
@@ -1043,13 +1281,16 @@ class LunaEngine:
                 "risk": "low" if category in {"path_open", "file_read"} else "medium",
                 "requiresConfirmation": True if category == "system_input" else self._action_mode() == "ask",
                 "recommendedAction": title,
-                "reason": simple_reasons[category],
+                "reason": simple_reasons[category] + route_note + tool_note,
                 "category": category,
+                "toolName": tool.name if tool is not None else "",
+                "toolRisk": tool.risk if tool is not None else "",
             }
         try:
             action_plan = self.xeno.plan_action(
                 category=category,
                 title=title,
+                user_input=route.user_input if route is not None else "",
                 project_context=self._project_context(),
                 desktop_context=self._observer_context(refresh=False),
             )
@@ -1063,6 +1304,13 @@ class LunaEngine:
                 "reason": f"Xeno kontrola spadla, Luna proto drží konzervativní režim potvrzení. Detail: {error}",
                 "category": category,
             }
+        if tool is not None:
+            action_plan["toolName"] = tool.name
+            action_plan["toolRisk"] = tool.risk
+            action_plan["toolRequiresConfirmation"] = tool.requires_confirmation
+            existing_reason = str(action_plan.get("reason", "") or "")
+            if tool_note and tool.name not in existing_reason:
+                action_plan["reason"] = (existing_reason + tool_note).strip()
         return action_plan
 
     def _project_memory_sections(self, project: object) -> dict[str, list[str]]:
@@ -1084,6 +1332,15 @@ class LunaEngine:
             current_title = self.pending_action[1]
             return f"Luna: Nejdriv prosim vyrid cekajici akci `{current_title}`. Pak muzu pripravit dalsi."
         action_plan = self._plan_action_with_xeno(category, title)
+        tool_name = str(action_plan.get("toolName", "") or "")
+        self.agent_run_state.update(
+            status="planned",
+            owner="Xeno" if bool(action_plan.get("xeno_consulted", True)) else "Luna",
+            action_title=title,
+            tool_name=tool_name,
+            requires_confirmation=bool(action_plan.get("requiresConfirmation", False)),
+            note=self._action_plan_note(action_plan),
+        )
         self._set_action_coordination(category=category, title=title, action_plan=action_plan, phase="prepare")
         if str(action_plan.get("status", "")).strip().lower() == "blocked":
             result = self._coerce_action_result(
@@ -1097,6 +1354,13 @@ class LunaEngine:
                 title=title,
             )
             self._log_action(category, title, "blocked", str(result.get("detail", "")))
+            self.agent_run_state.update(status="blocked", final_message=str(result.get("detail", "")))
+            self._trace_agent(
+                phase="xeno_check",
+                status="blocked",
+                detail=str(result.get("detail", "")),
+                metadata={"category": category, "title": title, "tool": tool_name},
+            )
             return self._format_action_result_for_chat(result)
         if not self._is_action_allowed(category):
             result = self._coerce_action_result(
@@ -1110,6 +1374,13 @@ class LunaEngine:
                 title=title,
             )
             self._log_action(category, title, "blocked", str(result.get("detail", "")))
+            self.agent_run_state.update(status="blocked", final_message=str(result.get("detail", "")))
+            self._trace_agent(
+                phase="action_policy",
+                status="blocked",
+                detail=str(result.get("detail", "")),
+                metadata={"category": category, "title": title, "tool": tool_name},
+            )
             return self._format_action_result_for_chat(result)
         mode = self._action_mode()
         force_confirmation = category in {"system_input"}
@@ -1125,11 +1396,25 @@ class LunaEngine:
                 title=title,
             )
             self._log_action(category, title, "blocked", str(result.get("detail", "")))
+            self.agent_run_state.update(status="blocked", final_message=str(result.get("detail", "")))
+            self._trace_agent(
+                phase="action_policy",
+                status="blocked",
+                detail=str(result.get("detail", "")),
+                metadata={"category": category, "title": title, "tool": tool_name},
+            )
             return self._format_action_result_for_chat(result)
         if mode == "ask" or force_confirmation:
             self.pending_action = (category, title, callback)
             self.pending_action_plan = action_plan
             self._log_action(category, title, "pending", f"Pending approval for {title}.")
+            self.agent_run_state.update(status="awaiting_confirmation", requires_confirmation=True)
+            self._trace_agent(
+                phase="action_plan",
+                status="pending",
+                detail=self._action_plan_note(action_plan) or f"Pending approval for {title}.",
+                metadata={"category": category, "title": title, "mode": mode, "tool": tool_name},
+            )
             return self._format_action_result_for_chat(
                 {
                     "status": "pending",
@@ -1139,8 +1424,9 @@ class LunaEngine:
                 pending=True,
             )
         try:
+            self.agent_run_state.update(status="executing", requires_confirmation=False)
             self._set_action_coordination(category=category, title=title, action_plan=action_plan, phase="execute")
-            result = self._coerce_action_result(callback(), category=category, title=title)
+            result = self._run_action_with_verification(category, title, callback)
         except OSError as error:
             result = self._coerce_action_result(
                 {
@@ -1153,8 +1439,25 @@ class LunaEngine:
                 title=title,
             )
             self._log_action(category, title, "failed", str(result.get("detail", "")))
+            self.agent_run_state.update(status="failed", final_message=str(result.get("detail", "")))
+            self._trace_agent(
+                phase="action_execute",
+                status="failed",
+                detail=str(result.get("detail", "")),
+                metadata={"category": category, "title": title, "tool": tool_name},
+            )
             return self._format_action_result_for_chat(result)
         self._log_action(category, title, str(result.get("status", "completed")), str(result.get("detail", result.get("message", ""))))
+        self.agent_run_state.update(
+            status=str(result.get("status", "completed")),
+            final_message=str(result.get("verification", result.get("detail", result.get("message", "")))),
+        )
+        self._trace_agent(
+            phase="action_execute",
+            status=str(result.get("status", "completed")),
+            detail=str(result.get("verification", result.get("detail", result.get("message", "")))),
+            metadata={"category": category, "title": title, "tool": tool_name},
+        )
         return self._format_action_result_for_chat(result)
 
     def has_pending_action(self) -> bool:
@@ -1179,6 +1482,7 @@ class LunaEngine:
             return "Luna: Ted tu nemam zadnou cekajici akci."
         category, title, callback = self.pending_action
         action_plan = self.pending_action_plan
+        tool_name = str(action_plan.get("toolName", "") or "") if action_plan is not None else ""
         self.pending_action = None
         self.pending_action_plan = None
         if normalized in {"zrus akci", "cancel action"}:
@@ -1194,10 +1498,23 @@ class LunaEngine:
                 title=title,
             )
             self._log_action(category, title, "cancelled", str(result.get("detail", "")))
+            self.agent_run_state.update(status="cancelled", final_message=str(result.get("detail", "")))
+            self._trace_agent(
+                phase="action_execute",
+                status="cancelled",
+                detail=str(result.get("detail", "")),
+                metadata={"category": category, "title": title, "tool": tool_name},
+            )
             return self._format_action_result_for_chat(result)
         try:
+            self.agent_run_state.update(
+                status="executing",
+                action_title=title,
+                tool_name=tool_name,
+                requires_confirmation=False,
+            )
             self._set_action_coordination(category=category, title=title, action_plan=action_plan, phase="execute")
-            result = self._coerce_action_result(callback(), category=category, title=title)
+            result = self._run_action_with_verification(category, title, callback)
         except OSError as error:
             result = self._coerce_action_result(
                 {
@@ -1210,8 +1527,25 @@ class LunaEngine:
                 title=title,
             )
             self._log_action(category, title, "failed", str(result.get("detail", "")))
+            self.agent_run_state.update(status="failed", final_message=str(result.get("detail", "")))
+            self._trace_agent(
+                phase="action_execute",
+                status="failed",
+                detail=str(result.get("detail", "")),
+                metadata={"category": category, "title": title, "tool": tool_name},
+            )
             return self._format_action_result_for_chat(result)
         self._log_action(category, title, str(result.get("status", "completed")), str(result.get("detail", result.get("message", ""))))
+        self.agent_run_state.update(
+            status=str(result.get("status", "completed")),
+            final_message=str(result.get("verification", result.get("detail", result.get("message", "")))),
+        )
+        self._trace_agent(
+            phase="action_execute",
+            status=str(result.get("status", "completed")),
+            detail=str(result.get("verification", result.get("detail", result.get("message", "")))),
+            metadata={"category": category, "title": title, "tool": tool_name},
+        )
         return self._format_action_result_for_chat(result)
 
     def _resolve_local_target(self, raw_target: str) -> Path | None:
@@ -1792,6 +2126,7 @@ class LunaEngine:
         )
         if web_page_match and "web projekt" not in lowered:
             explain_requested = any(token in lowered for token in ["vysvetli", "vysv?tli", "explain", "popis", "popsat"])
+            open_in_vscode = self._mentions_vscode(normalized)
 
             def create_web_page() -> str:
                 workspace = self._default_action_root()
@@ -1819,7 +2154,7 @@ class LunaEngine:
                 else:
                     message = f"{message} Náhled najdeš tady: {index_file}"
 
-                if self.user_settings.data.vscode_path.strip() and self._is_action_allowed("app_launch"):
+                if open_in_vscode and self.user_settings.data.vscode_path.strip() and self._is_action_allowed("app_launch"):
                     try:
                         vscode_message = self.desktop_actions.open_web_folder_in_vscode(self.user_settings.data.vscode_path, web_folder)
                         message = f"{message} {vscode_message}."
@@ -1827,6 +2162,8 @@ class LunaEngine:
                         message = f"{message} VS Code se nepodařilo otevřít automaticky: {error}"
                 else:
                     message = f"{message} Ve VS Code otevři složku: {web_folder}"
+                if not open_in_vscode and " Ve VS Code " in message:
+                    message = message.rsplit(" Ve VS Code ", 1)[0].rstrip()
                 if explain_requested:
                     explanation = (
                         "Vysvětlení: `web/index.html` drží obsah stránky, "
@@ -2265,17 +2602,66 @@ class LunaEngine:
             "xenoActive": False,
             "tracks": [],
         }
+        self._active_agent_route = None
         cleaned_input = repair_text(str(user_input or "")).strip()
+        extra_context = repair_text(str(extra_context or "")).strip()
         if not cleaned_input:
             return ""
         if cleaned_input.lower() == "exit":
             return "Luna: Dobre. Az budes chtit pokracovat, jsem tady 🙂"
+
+        initial_route = self.agent_router.route(
+            cleaned_input,
+            extra_context=extra_context,
+            current_action_mode=self._action_mode(),
+            xeno_consulted=False,
+        )
+        self._active_agent_route = initial_route
+        self._trace_agent(
+            phase="route",
+            status="selected",
+            detail=initial_route.reason,
+            metadata={
+                "source": initial_route.input_source,
+                "scope": initial_route.action_scope,
+                "force_auto_execution": initial_route.force_auto_execution,
+                "live_visual_query": initial_route.live_visual_query,
+            },
+        )
+        self.agent_run_state.start(
+            user_input=cleaned_input,
+            input_source=initial_route.input_source,
+            owner="Xeno" if initial_route.consult_xeno and initial_route.action_scope != "conversation" else "Luna",
+            scope=initial_route.action_scope,
+            risk=initial_route.risk,
+            vision_active=initial_route.vision_active,
+            xeno_active=initial_route.consult_xeno,
+            status="routed",
+            note=initial_route.reason,
+        )
 
         pending_action_result = self._handle_pending_action_command(cleaned_input)
         if pending_action_result is not None:
             self.memory_coordinator.remember_user_input(cleaned_input, "action")
             self.memory_coordinator.save_exchange(cleaned_input, pending_action_result)
             return pending_action_result
+
+        if initial_route.action_scope == "blocked_risk":
+            blocked_response = (
+                "Luna: Tuhle rizikovou akci nespustím automaticky. "
+                "Vypadá jako mazání nebo zásah do systému, takže ji držím zablokovanou. 🙂"
+            )
+            self._log_action("system", cleaned_input[:120], "blocked", initial_route.reason)
+            self._trace_agent(
+                phase="route",
+                status="blocked",
+                detail=initial_route.reason,
+                metadata={"user_input": cleaned_input[:180]},
+            )
+            self.agent_run_state.update(status="blocked", final_message=blocked_response, note="Risk guardrail blocked the request.")
+            self.memory_coordinator.remember_user_input(cleaned_input, "action")
+            self.memory_coordinator.save_exchange(cleaned_input, blocked_response)
+            return blocked_response
 
         internet_result = self._handle_internet_command(cleaned_input)
         if internet_result is not None:
@@ -2287,18 +2673,33 @@ class LunaEngine:
             self.memory_coordinator.save_exchange(cleaned_input, screen_share_help_result)
             return screen_share_help_result
 
+        local_capability_result = self._handle_local_capability_command(cleaned_input)
+        if local_capability_result is not None:
+            self.memory_coordinator.remember_user_input(cleaned_input, "support")
+            self.memory_coordinator.save_exchange(cleaned_input, local_capability_result)
+            return local_capability_result
+
         observation_result = self._handle_observation_command(cleaned_input)
         if observation_result is not None:
             self.memory_coordinator.remember_user_input(cleaned_input, "action")
             self.memory_coordinator.save_exchange(cleaned_input, observation_result)
             return observation_result
 
-        local_action_result = self._try_local_action(cleaned_input)
-        if local_action_result is not None:
-            self.memory_coordinator.remember_user_input(cleaned_input, "action")
-            self.memory_coordinator.save_exchange(cleaned_input, local_action_result)
-            self._remember_project_chat_focus(cleaned_input, local_action_result)
-            return local_action_result
+        if initial_route.should_attempt_local_action:
+            original_override = self._action_mode_override
+            if initial_route.force_auto_execution and original_override is None:
+                self._action_mode_override = "auto"
+            try:
+                local_action_result = self._try_local_action(cleaned_input)
+            finally:
+                if initial_route.force_auto_execution and original_override is None:
+                    self._action_mode_override = original_override
+
+            if local_action_result is not None:
+                self.memory_coordinator.remember_user_input(cleaned_input, "action")
+                self.memory_coordinator.save_exchange(cleaned_input, local_action_result)
+                self._remember_project_chat_focus(cleaned_input, local_action_result)
+                return local_action_result
 
         workflow_data = self.workflow.process(cleaned_input, self.memory.load_history())
         if workflow_data["system_message"]:
@@ -2309,57 +2710,83 @@ class LunaEngine:
 
         self._last_support_model_source = "unused"
         self._last_primary_model_source = "nvidia" if self.settings.model_type == "nvidia" else "lm_studio"
-        xeno_consulted = self.xeno.should_consult(workflow_data["user_input"])
+        xeno_requested = self.xeno.should_consult(workflow_data["user_input"])
+        agent_route = self.agent_router.route(
+            workflow_data["user_input"],
+            extra_context=extra_context,
+            current_action_mode=self._action_mode(),
+            xeno_consulted=xeno_requested,
+        )
+        self._active_agent_route = agent_route
+        xeno_consulted = agent_route.consult_xeno
+        self._trace_agent(
+            phase="route",
+            status="orchestrated",
+            detail=agent_route.reason,
+            metadata={
+                "source": agent_route.input_source,
+                "scope": agent_route.action_scope,
+                "xeno_consulted": xeno_consulted,
+                "vision_active": agent_route.vision_active,
+            },
+        )
         response_author = self._response_author(workflow_data["user_input"], xeno_consulted=xeno_consulted)
+        self.agent_run_state.update(owner=response_author, xeno_active=xeno_consulted, status="thinking")
         internet_context = self._internet_context(workflow_data["user_input"])
-        hidden_support = self._hidden_xeno_support(workflow_data["user_input"])
-        automation_summary = self.xeno.build_automation_summary(workflow_data["user_input"])
-        if automation_summary:
-            hidden_support = (f"{hidden_support}\n\n{automation_summary}".strip() if hidden_support else automation_summary)
+        hidden_xeno_support = self._hidden_xeno_support(workflow_data["user_input"])
+        automation_summary = "\n".join(
+            part
+            for part in [
+                self.xeno.build_automation_summary(workflow_data["user_input"]),
+                agent_route.summary,
+                self.tool_registry.summary_for_prompt(agent_route.action_scope),
+            ]
+            if str(part or "").strip()
+        )
+        observer_context = ""
+        if self.observe_mode_enabled:
+            observer_context = self._observer_context(refresh=self._observer_refresh_enabled())
         coordination = self._build_internal_coordination(
             user_input=workflow_data["user_input"],
             response_author=response_author,
             xeno_consulted=xeno_consulted,
             automation_summary=automation_summary,
-            hidden_support=hidden_support,
+            hidden_support=hidden_xeno_support,
         )
-        self.last_coordination = coordination
-        coordination_prompt = self._format_coordination_prompt(coordination)
-        if coordination_prompt:
-            hidden_support = (f"{coordination_prompt}\n\n{hidden_support}".strip() if hidden_support else coordination_prompt)
-        extra_context = repair_text(str(extra_context or "")).strip()
-        if extra_context:
-            hidden_support = (f"{hidden_support}\n\n{extra_context}".strip() if hidden_support else extra_context)
-        if self.observe_mode_enabled:
-            observer_context = self._observer_context(refresh=self._observer_refresh_enabled())
-            if observer_context:
-                hidden_support = (hidden_support + "\n\n" + observer_context).strip() if hidden_support else observer_context
         project_context = self._project_context()
         library_context = self._library_context(workflow_data["user_input"])
         session_context = self._session_context()
-        live_share_active = "Active desktop share:" in extra_context
-        live_visual_query = live_share_active and self._is_live_visual_query(cleaned_input)
-        if live_visual_query:
-            live_share_instruction = (
-                "Live shared desktop rule: ignore older screen descriptions from this chat. "
-                "Use only the newest shared frame and the newest live vision summary for this answer. "
-                "If the newest frame is unclear, say it is unclear instead of reusing an older screen state."
-            )
-            session_context = f"{session_context}\n{live_share_instruction}".strip() if session_context else live_share_instruction
+        live_visual_query = agent_route.live_visual_query
+        voice_mode = agent_route.input_source == "voice"
+        orchestrated = self.orchestrator.build(
+            user_input=workflow_data["user_input"],
+            base_instruction=workflow_data.get("instruction", ""),
+            response_author=response_author,
+            xeno_consulted=xeno_consulted,
+            coordination=coordination,
+            hidden_xeno_support=hidden_xeno_support,
+            automation_summary=automation_summary,
+            extra_context=extra_context,
+            observer_context=observer_context,
+            session_context=session_context,
+            live_visual_query=live_visual_query,
+            voice_mode=voice_mode,
+        )
+        self.last_coordination = orchestrated.coordination
         intelligence_level = self._normalized_intelligence_level()
         messages = self.build_messages(
             user_input=workflow_data["user_input"],
             mode=workflow_data["mode"],
-            instruction=workflow_data.get("instruction", ""),
+            instruction=orchestrated.instruction,
             internet_context=internet_context,
             selected_mode=workflow_data.get("selected_mode", "auto"),
             reasoning_box=workflow_data.get("reasoning_box", self.settings.default_reasoning_box),
-            hidden_support=hidden_support,
+            hidden_support=orchestrated.hidden_support,
             project_context=project_context,
             library_context=library_context,
-            session_context=session_context,
+            session_context=orchestrated.session_context,
             intelligence_level=intelligence_level,
-            include_history=not live_visual_query,
+            include_history=orchestrated.include_history,
         )
 
         if response_author == "Xeno":
@@ -2371,6 +2798,17 @@ class LunaEngine:
         debug_footer = self._build_model_debug_footer(xeno_consulted=xeno_consulted)
         self.last_model_debug = debug_footer
         response = str(response).rstrip()
+        self._trace_agent(
+            phase="response",
+            status="completed",
+            detail=f"Final speaker: {response_author}. Response length: {len(response)} chars.",
+            metadata={
+                "response_author": response_author,
+                "primary_model_source": self._last_primary_model_source,
+                "support_model_source": self._last_support_model_source,
+            },
+        )
+        self.agent_run_state.update(status="completed", owner=response_author, final_message=response)
         self.memory_coordinator.save_exchange(cleaned_input, response, assistant_author=response_author)
         self._remember_project_chat_focus(cleaned_input, response)
         return response

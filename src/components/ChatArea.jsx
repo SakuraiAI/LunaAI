@@ -322,15 +322,6 @@ export default function ChatArea({
   const hasMessages = messages.length > 0;
   const messagesPanelRef = useRef(null);
   const messagesEndRef = useRef(null);
-  const lunaThinking = Boolean(thinkingState?.visible && (thinkingState?.lunaActive ?? !thinkingState?.xenoActive));
-  const xenoThinking = Boolean(thinkingState?.visible && thinkingState?.xenoActive);
-  const heroThinkingClass = lunaThinking && xenoThinking
-    ? 'is-dual-thinking'
-    : lunaThinking
-      ? 'is-luna-thinking'
-      : xenoThinking
-        ? 'is-xeno-thinking'
-        : '';
 
   useEffect(() => {
     if (!hasMessages && !revealingMessage?.content) return;
@@ -371,22 +362,6 @@ export default function ChatArea({
 
   return (
     <section className="chat-workspace is-live">
-      <div className={`hero-panel ${hasMessages ? 'is-compact' : ''} ${heroThinkingClass}`}>
-        <div className={`hero-node hero-node-left ${lunaThinking ? 'is-active' : ''} ${xenoThinking ? 'is-dual-active' : ''}`}>
-          <span className="hero-node-eyebrow">Visible interface</span>
-          <span className="hero-node-label">LunaAI</span>
-        </div>
-        <div className={`hero-center-orb ${heroThinkingClass}`}>
-          <span className={`hero-connector hero-connector-left ${lunaThinking ? 'is-active' : ''} ${xenoThinking ? 'is-dual-active' : ''}`} aria-hidden="true" />
-          <Orb3D />
-          <span className={`hero-connector hero-connector-right ${xenoThinking ? 'is-active is-dual-active' : ''}`} aria-hidden="true" />
-        </div>
-        <div className={`hero-node hero-node-right ${xenoThinking ? 'is-active is-dual-active' : ''}`}>
-          <span className="hero-node-eyebrow">Reasoning layer</span>
-          <span className="hero-node-label">XenoAI</span>
-        </div>
-      </div>
-
       <div className="messages-panel" ref={messagesPanelRef}>
         <ThinkingPanel thinkingState={thinkingState} />
         {messages.map((message) => (

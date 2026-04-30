@@ -1,4 +1,4 @@
-import { app, BrowserWindow, desktopCapturer, ipcMain, session, shell } from 'electron';
+import { app, BrowserWindow, desktopCapturer, ipcMain, Menu, nativeImage, screen, session, shell, Tray } from 'electron';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import os from 'node:os';
@@ -17,6 +17,8 @@ const __dirname = path.dirname(__filename);
 const isDev = !app.isPackaged;
 
 let mainWindow = null;
+let assistantWindow = null;
+let tray = null;
 let pendingLunaAction = null;
 let pendingScreenShareSourceId = '';
 const readSystemMetrics = createSystemMetricsReader();
@@ -114,6 +116,249 @@ function createWindow() {
   }
 }
 
+function buildAssistantOverlayHtml() {
+  return `<!doctype html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <style>
+    * { box-sizing: border-box; }
+    html, body {
+      width: 100%;
+      height: 100%;
+      margin: 0;
+      overflow: hidden;
+      background: transparent;
+      font-family: "Segoe UI", sans-serif;
+      color: #f5f5f5;
+    }
+    .assistant-widget {
+      width: 100%;
+      height: 100%;
+      display: grid;
+      place-items: center;
+      -webkit-app-region: drag;
+      user-select: none;
+    }
+    .assistant-card {
+      width: 248px;
+      min-height: 248px;
+      padding: 20px 18px 18px;
+      display: grid;
+      place-items: center;
+      gap: 12px;
+      border-radius: 34px;
+      background:
+        radial-gradient(circle at 50% 32%, rgba(255,255,255,0.12), transparent 44%),
+        linear-gradient(180deg, rgba(18,18,18,0.9), rgba(5,5,5,0.82));
+      border: 1px solid rgba(255,255,255,0.12);
+      box-shadow: 0 28px 80px rgba(0,0,0,0.44), inset 0 1px 0 rgba(255,255,255,0.08);
+      backdrop-filter: blur(20px);
+    }
+    .agents {
+      width: 100%;
+      display: flex;
+      justify-content: space-between;
+      color: rgba(255,255,255,0.72);
+      font-size: 12px;
+      font-weight: 800;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+    }
+    .orb {
+      position: relative;
+      width: 112px;
+      height: 112px;
+      display: grid;
+      place-items: center;
+      border-radius: 50%;
+      background: rgba(15,15,15,0.92);
+      border: 1px solid rgba(255,255,255,0.12);
+      box-shadow: 0 0 46px rgba(150,210,255,0.12);
+    }
+    .orb::before,
+    .orb::after {
+      content: "";
+      position: absolute;
+      border-radius: inherit;
+      border: 1px solid rgba(255,255,255,0.08);
+      animation: ring 2.4s ease-in-out infinite;
+    }
+    .orb::before { inset: -14px; }
+    .orb::after { inset: -28px; animation-delay: 0.35s; opacity: 0.58; }
+    .core {
+      width: 72px;
+      height: 72px;
+      border-radius: 50%;
+      background: radial-gradient(circle at 35% 30%, #fff 0%, #e7e7e7 18%, #9c9c9c 52%, #111 100%);
+      box-shadow: 0 0 42px rgba(255,255,255,0.28), 0 0 70px rgba(140,205,255,0.16);
+      animation: pulse 1.35s ease-in-out infinite;
+    }
+    .status {
+      text-align: center;
+      display: grid;
+      gap: 5px;
+    }
+    .status strong {
+      font-size: 18px;
+      letter-spacing: -0.03em;
+    }
+    .status span {
+      color: rgba(255,255,255,0.58);
+      font-size: 12px;
+    }
+    .actions {
+      display: flex;
+      gap: 8px;
+      -webkit-app-region: no-drag;
+    }
+    button {
+      border: 1px solid rgba(255,255,255,0.12);
+      border-radius: 999px;
+      padding: 8px 12px;
+      background: rgba(255,255,255,0.08);
+      color: #fff;
+      font: inherit;
+      font-size: 12px;
+      font-weight: 700;
+      cursor: pointer;
+    }
+    button.primary {
+      background: #f5f5f5;
+      color: #111;
+    }
+    @keyframes pulse {
+      0%, 100% { transform: scale(1); filter: brightness(1); }
+      50% { transform: scale(1.12); filter: brightness(1.2); }
+    }
+    @keyframes ring {
+      0%, 100% { transform: scale(0.96); opacity: 0.5; }
+      50% { transform: scale(1.08); opacity: 1; }
+    }
+  </style>
+</head>
+<body>
+  <main class="assistant-widget">
+    <section class="assistant-card">
+      <div class="agents"><span>LunaAI</span><span>XenoAI</span></div>
+      <div class="orb"><div class="core"></div></div>
+      <div class="status">
+        <strong>Assistant mode</strong>
+        <span>voice + vision + agent</span>
+      </div>
+      <div class="actions">
+        <button class="primary" onclick="window.lunaDesktop?.window?.show?.()">Open</button>
+        <button onclick="window.lunaDesktop?.window?.hideAssistantOverlay?.()">Hide</button>
+      </div>
+    </section>
+  </main>
+</body>
+</html>`;
+}
+
+function positionAssistantWindow() {
+  if (!assistantWindow) return;
+  const primaryDisplay = screen.getPrimaryDisplay();
+  const area = primaryDisplay.workArea;
+  const bounds = assistantWindow.getBounds();
+  assistantWindow.setPosition(
+    Math.round(area.x + (area.width - bounds.width) / 2),
+    Math.round(area.y + 28),
+    false,
+  );
+}
+
+function createAssistantWindow() {
+  if (assistantWindow && !assistantWindow.isDestroyed()) return assistantWindow;
+  assistantWindow = new BrowserWindow({
+    width: 320,
+    height: 320,
+    show: false,
+    frame: false,
+    transparent: true,
+    resizable: false,
+    movable: true,
+    skipTaskbar: true,
+    alwaysOnTop: true,
+    hasShadow: false,
+    backgroundColor: '#00000000',
+    webPreferences: {
+      preload: path.join(__dirname, 'preload.cjs'),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: false,
+    },
+  });
+  assistantWindow.setAlwaysOnTop(true, 'screen-saver');
+  assistantWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+  assistantWindow.on('closed', () => {
+    assistantWindow = null;
+  });
+  assistantWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(buildAssistantOverlayHtml())}`);
+  return assistantWindow;
+}
+
+function showAssistantOverlay() {
+  const overlay = createAssistantWindow();
+  positionAssistantWindow();
+  overlay.showInactive();
+  return overlay;
+}
+
+function hideAssistantOverlay() {
+  if (assistantWindow && !assistantWindow.isDestroyed()) {
+    assistantWindow.hide();
+  }
+}
+
+function showMainWindow() {
+  if (!mainWindow) {
+    createWindow();
+    return;
+  }
+  mainWindow.show();
+  if (mainWindow.isMinimized()) {
+    mainWindow.restore();
+  }
+  mainWindow.focus();
+}
+
+function createTray() {
+  if (tray) return tray;
+  const icon = nativeImage.createFromDataURL(
+    'data:image/svg+xml;utf8,'
+      + encodeURIComponent(`
+        <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32">
+          <rect width="32" height="32" rx="10" fill="#0b0b0b"/>
+          <circle cx="16" cy="16" r="10" fill="#d9d9d9"/>
+          <circle cx="12" cy="12" r="4" fill="#ffffff"/>
+          <circle cx="16" cy="16" r="14" fill="none" stroke="#5f6f7a" stroke-opacity=".55"/>
+        </svg>
+      `),
+  );
+  tray = new Tray(icon);
+  tray.setToolTip('LunaAI Assistant');
+  tray.setContextMenu(Menu.buildFromTemplate([
+    { label: 'Show LunaAI', click: showMainWindow },
+    {
+      label: 'Hide LunaAI',
+      click: () => {
+        mainWindow?.hide();
+      },
+    },
+    { type: 'separator' },
+    {
+      label: 'Quit',
+      click: () => {
+        app.quit();
+      },
+    },
+  ]));
+  tray.on('click', showMainWindow);
+  return tray;
+}
+
 app.whenReady().then(() => {
   session.defaultSession.setDisplayMediaRequestHandler(
     async (_request, callback) => {
@@ -142,6 +387,7 @@ app.whenReady().then(() => {
   });
 
   createWindow();
+  createTray();
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {
@@ -172,6 +418,27 @@ ipcMain.handle('window:maximize', () => {
 
 ipcMain.handle('window:close', () => {
   mainWindow?.close();
+});
+
+ipcMain.handle('window:hide-to-tray', () => {
+  createTray();
+  mainWindow?.hide();
+  return { ok: true, message: 'LunaAI is still running in the tray.' };
+});
+
+ipcMain.handle('window:show', () => {
+  showMainWindow();
+  return { ok: true };
+});
+
+ipcMain.handle('window:show-assistant-overlay', () => {
+  showAssistantOverlay();
+  return { ok: true, message: 'Assistant overlay is visible on the desktop.' };
+});
+
+ipcMain.handle('window:hide-assistant-overlay', () => {
+  hideAssistantOverlay();
+  return { ok: true, message: 'Assistant overlay hidden.' };
 });
 
 ipcMain.handle('app:get-meta', () => {
