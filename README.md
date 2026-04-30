@@ -1,42 +1,29 @@
-# Luna & Xeno — Local AI System that Works on Your PC
+# Luna & Xeno
 
-A local AI system that can run and debug projects directly on your PC.
+Local AI system that can run, inspect, and help debug projects directly on your PC.
 
-## 🚀 What it does
+## What It Does
 
-- Runs projects on your PC
+- Runs local projects
 - Detects and explains errors
-- Suggests fixes
-- Opens and controls apps (like VS Code)
+- Suggests practical fixes
+- Opens and controls desktop apps such as VS Code
 
-## 🧠 System
+## System Layers
 
-- **Luna** – communication and explanation  
-- **Xeno** – logic and problem solving  
-- **Agent** – executes actions on your PC  
-- **Vision** – analyzes screen and detects issues  
+- `Luna`: user-facing communication and guidance
+- `Xeno`: planning, reasoning, and project shaping
+- `Agent`: local execution and action routing
+- `Vision`: screen observation and visual analysis
 
-## 🎯 Goal
+## Stack
 
-To create an AI that works *with you*, not instead of you.
+- Python backend
+- Electron shell
+- React frontend
+- OpenAI / NVIDIA model integrations
+- Local desktop tooling
 
-## 📸 Demo
-
-Coming soon...
-
-## 🛠️ Tech
-
-- Electron  
-- Node.js  
-- OpenAI / NVIDIA models  
-- Local system integration  
-
-## ⚠️ Status
+## Status
 
 Work in progress.
-
-## 🔮 Future
-
-- Mobile control  
-- Memory system  
-- Integration with more tools  

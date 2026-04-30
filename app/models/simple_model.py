@@ -2,8 +2,11 @@ from app.models.base_model import BaseModel
 
 
 class SimpleModel(BaseModel):
-    def generate(self, prompt: str, context: str = "") -> str:
-        if "User:" in prompt:
+    def generate(self, prompt: str | list[dict[str, str]]) -> str:
+        if isinstance(prompt, list):
+            last_user_messages = [item.get("content", "") for item in prompt if item.get("role") == "user"]
+            last_input = (last_user_messages[-1] if last_user_messages else "").strip().lower()
+        elif "User:" in prompt:
             last_input = prompt.split("User:")[-1].strip().lower()
         elif " User:" in prompt:
             last_input = prompt.split(" User:")[-1].strip().lower()

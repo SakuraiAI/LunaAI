@@ -56,6 +56,9 @@ contextBridge.exposeInMainWorld('lunaDesktop', {
       };
     },
   },
+  agent: {
+    execute: (payload) => ipcRenderer.invoke('agent:execute', payload),
+  },
   luna: {
     getState: () => ipcRenderer.invoke('luna:get-state'),
     createChat: (title) => ipcRenderer.invoke('luna:create-chat', title),

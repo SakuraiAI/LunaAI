@@ -1,1 +1,5 @@
+openai>=1.51.0
+PySide6>=6.8.0
+mss>=10.0.0
+Pillow>=10.4.0
 nvidia-riva-client>=2.25.1

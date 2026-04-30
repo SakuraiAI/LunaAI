@@ -1,4 +1,4 @@
-﻿from app.xeno.models import BuilderResult, ProjectBlueprint
+from app.xeno.models import BuilderResult, ProjectBlueprint
 from app.xeno.planner import XenoPlanner
 from app.xeno.task_agent import TaskAgent
 
@@ -80,4 +80,4 @@ class ProjectBuilder:
         cleaned = user_input.strip()
         if cleaned:
             return cleaned
-        return "Build a new project with a clear first version and execution plan."
+        return "Build a new project with a clear first version and execution plan."

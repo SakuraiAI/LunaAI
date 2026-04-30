@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Callable
+from typing import Callable, Any
 from collections import OrderedDict
 import re
 import time
@@ -150,7 +150,7 @@ class LunaEngine:
         )
         self._apply_runtime_limits()
 
-    def _serialize_project(self, record: object) -> dict[str, object] | None:
+    def _serialize_project(self, record: Any) -> dict[str, Any] | None:
         if record is None:
             return None
         return {
@@ -172,7 +172,7 @@ class LunaEngine:
         return level if level in {"3", "4", "5"} else "4"
 
 
-    def _clamp_percent(self, value: object, fallback: int) -> int:
+    def _clamp_percent(self, value: Any, fallback: int) -> int:
         try:
             parsed = int(value)
         except (TypeError, ValueError):
@@ -187,7 +187,7 @@ class LunaEngine:
             "memory": self._clamp_percent(getattr(workspace, "memory_limit_percent", 50), 50),
         }
 
-    def _runtime_budget_profile(self) -> dict[str, object]:
+    def _runtime_budget_profile(self) -> dict[str, Any]:
         limits = self._runtime_limits()
         headroom = min(limits["cpu"], limits["gpu"], limits["memory"])
         profile = "balanced"
@@ -649,13 +649,13 @@ class LunaEngine:
     def describe_local_capabilities(self) -> str:
         workspace = self.user_settings.data
         runtime = self._runtime_budget_profile()
-        limits = runtime["limits"]
+        limits: dict[str, int] = runtime.get("limits", {})  # type: ignore
         lines = [
             "Luna local control overview:",
             f"System control profile: {workspace.system_control_profile}",
             f"Agent execution mode: {workspace.agent_execution_mode}",
             f"Runtime profile: {runtime['profile']}",
-            f"Runtime limits -> CPU {limits['cpu']}% | GPU {limits['gpu']}% | Memory {limits['memory']}%",
+            f"Runtime limits -> CPU {limits.get('cpu', 0)}% | GPU {limits.get('gpu', 0)}% | Memory {limits.get('memory', 0)}%",
             f"App launch: {'enabled' if workspace.allow_app_launch else 'blocked'}",
             f"Path open: {'enabled' if workspace.allow_path_open else 'blocked'}",
             f"File changes: {'enabled' if workspace.allow_file_changes else 'blocked'}",
@@ -1157,6 +1157,52 @@ class LunaEngine:
             return text[: limit - 1].rstrip() + "..."
         return text
 
+    def _browser_target_matches_observation(
+        self,
+        target_domain: str,
+        observation: dict[str, object],
+    ) -> bool:
+        normalized_domain = ascii_fold_text(str(target_domain or "")).lower().strip()
+        if not normalized_domain:
+            return False
+        normalized_domain = normalized_domain.removeprefix("www.")
+        url_hint = ascii_fold_text(str(observation.get("url_hint", "") or "")).lower().strip()
+        title = ascii_fold_text(str(observation.get("active_window_title", "") or "")).lower().strip()
+
+        domain_aliases = {
+            "youtube.com": {"youtube", "youtu.be"},
+            "google.com": {"google"},
+            "mail.google.com": {"gmail", "google mail"},
+            "github.com": {"github"},
+            "chatgpt.com": {"chatgpt", "openai"},
+            "reddit.com": {"reddit"},
+            "discord.com": {"discord"},
+            "x.com": {"x", "twitter"},
+        }
+
+        candidate_tokens = {normalized_domain}
+        for domain, aliases in domain_aliases.items():
+            normalized_key = domain.removeprefix("www.")
+            if normalized_domain == normalized_key or normalized_domain.endswith(f".{normalized_key}"):
+                candidate_tokens.update(aliases)
+        return any(token and (token in url_hint or token in title) for token in candidate_tokens)
+
+    def _verify_action_target(
+        self,
+        result: dict[str, object],
+        after: dict[str, object],
+    ) -> tuple[bool, str]:
+        expected_app_key = ascii_fold_text(str(result.get("expected_app_key", "") or "")).lower().strip()
+        observed_app_key = ascii_fold_text(str(after.get("app_key", "") or "")).lower().strip()
+        if expected_app_key and observed_app_key != expected_app_key:
+            return False, f"Aktivní aplikace po akci je `{observed_app_key or 'unknown'}`, ne očekávaný `{expected_app_key}`."
+
+        target_domain = ascii_fold_text(str(result.get("target_domain", "") or "")).lower().strip()
+        if target_domain and not self._browser_target_matches_observation(target_domain, after):
+            return False, f"Nepodařilo se mi potvrdit, že je otevřený web `{target_domain}`."
+
+        return True, ""
+
     def _attach_action_loop_verification(
         self,
         result: dict[str, object],
@@ -1203,6 +1249,18 @@ class LunaEngine:
             if vision_summary:
                 after["vision_summary"] = vision_summary
                 verification += " Vision: " + self._compact_verification_text(vision_summary, limit=260)
+
+        target_confirmed, target_note = self._verify_action_target(result, after)
+        if not target_confirmed:
+            result["ok"] = False
+            result["status"] = "failed"
+            base_message = repair_text(str(result.get("message", "")).strip())
+            result["message"] = f"Akci jsem zkusila spustit, ale výsledek jsem nepotvrdila. {target_note}".strip()
+            base_detail = repair_text(str(result.get("detail", "")).strip())
+            verification = f"{verification} Cílový výsledek nebyl potvrzen: {target_note}".strip()
+            result["verification"] = verification
+            result["detail"] = "\n\n".join(part for part in [base_detail or base_message, verification] if part).strip()
+            return result
 
         result["verification"] = verification
         message = repair_text(str(result.get("message", "")).strip())
@@ -1793,6 +1851,7 @@ class LunaEngine:
 
         separators = [
             r"\s+a pak\s+",
+            r"\s+a\s+",
             r"\s+potom\s+",
             r"\s+and then\s+",
             r"\s+then\s+",
@@ -1800,9 +1859,57 @@ class LunaEngine:
         for separator in separators:
             if re.search(separator, normalized, flags=re.IGNORECASE):
                 parts = [part.strip(" ,.") for part in re.split(separator, normalized, flags=re.IGNORECASE) if part.strip(" ,.")]
-                if len(parts) > 1:
+                if len(parts) > 1 and all(self._looks_like_action_phrase(part) for part in parts):
                     return parts
         return [normalized]
+
+    def _looks_like_action_phrase(self, text: str) -> bool:
+        lowered = ascii_fold_text(str(text or "")).lower().strip()
+        if not lowered:
+            return False
+        action_markers = (
+            "otevri",
+            "otevrit",
+            "open",
+            "spust",
+            "spustit",
+            "zapni",
+            "launch",
+            "start",
+            "jdi na",
+            "go to",
+            "bez na",
+            "naviguj na",
+            "vyhledej",
+            "search",
+            "klikni",
+            "click",
+            "stiskni",
+            "press",
+            "napis",
+            "type",
+        )
+        return any(lowered.startswith(marker) for marker in action_markers)
+
+    def _known_web_alias_url(self, value: str) -> str | None:
+        alias = ascii_fold_text(str(value or "")).lower().strip().strip("/").strip()
+        alias_map = {
+            "youtube": "https://www.youtube.com",
+            "yt": "https://www.youtube.com",
+            "google": "https://www.google.com",
+            "gmail": "https://mail.google.com",
+            "github": "https://github.com",
+            "reddit": "https://www.reddit.com",
+            "discord": "https://discord.com/app",
+            "chatgpt": "https://chatgpt.com",
+            "x": "https://x.com",
+            "twitter": "https://x.com",
+            "facebook": "https://www.facebook.com",
+            "instagram": "https://www.instagram.com",
+            "twitch": "https://www.twitch.tv",
+            "netflix": "https://www.netflix.com",
+        }
+        return alias_map.get(alias)
 
     def _chain_action_category(self, parts: list[str]) -> str:
         lowered = " ".join(parts).lower()
@@ -1866,6 +1973,39 @@ class LunaEngine:
         if not normalized:
             return None
 
+        browser_destination_match = re.fullmatch(
+            r'(?:otevri|otev\?i|open|spust|spus\?|zapni|launch|start|jdi na|go to|naviguj na) '
+            r'(?:mi )?(?:google chrome|chrome|prohlizec|browser)\s+'
+            r'(?:a\s+)?(?:jdi na|go to|open|otevri|otev\?i|naviguj na)\s+(.+)$',
+            normalized,
+            flags=re.IGNORECASE,
+        )
+        if browser_destination_match:
+            raw_target = browser_destination_match.group(1).strip().rstrip(".,;)]}\"'")
+            raw_url = self._known_web_alias_url(raw_target) or raw_target
+            return self._guarded_action(
+                "app_launch",
+                f"open url {raw_url}",
+                lambda: self.desktop_actions.open_url(raw_url, prefer_chrome=True),
+            )
+
+        navigation_match = re.fullmatch(
+            r'(?:jdi na|go to|naviguj na)\s+(.+)$',
+            normalized,
+            flags=re.IGNORECASE,
+        )
+        if navigation_match:
+            raw_target = navigation_match.group(1).strip().rstrip(".,;)]}\"'")
+            if raw_target.lower() in {"google chrome", "chrome", "prohlizec", "browser"}:
+                return self._guarded_action("app_launch", "open Chrome", lambda: self.desktop_actions.open_browser(prefer_chrome=True))
+            raw_url = self._known_web_alias_url(raw_target) or raw_target
+            if self._known_web_alias_url(raw_target) is not None or re.search(r"(https?://|localhost:|www\.|[a-z0-9-]+\.[a-z]{2,})", raw_url, flags=re.IGNORECASE):
+                return self._guarded_action(
+                    "app_launch",
+                    f"open url {raw_url}",
+                    lambda: self.desktop_actions.open_url(raw_url, prefer_chrome=True),
+                )
+
         list_folder_patterns = [
             r'(?:vypis|ukaz|zobraz|list|show) (?:mi )?(?:obsah )?(?:slozky|slozku|folder|adresar) ?(.+)?$',
             r'(?:co je|co mam|co se nachazi) (?:ve|v) (?:slozce|folderu|adresari) (.+)$',
@@ -1919,7 +2059,7 @@ class LunaEngine:
             return self._guarded_action("app_launch", f"open url {raw_url}", lambda: self.desktop_actions.open_url(raw_url, prefer_chrome=prefer_chrome))
 
         browser_match = re.fullmatch(
-            r'(?:otevri|otev\?i|open|spust|spus\?|zapni|launch|start) (?:mi )?(?:google chrome|chrome|prohlizec|browser)(?: .*)?',
+            r'(?:otevri|otev\?i|open|spust|spus\?|zapni|launch|start) (?:mi )?(?:google chrome|chrome|prohlizec|browser)',
             normalized,
             flags=re.IGNORECASE,
         )
@@ -1946,6 +2086,21 @@ class LunaEngine:
             raw_url = domain_match.group(1).strip()
             prefer_chrome = any(token in lowered for token in ["chrome", "google chrome"])
             return self._guarded_action("app_launch", f"open url {raw_url}", lambda: self.desktop_actions.open_url(raw_url, prefer_chrome=prefer_chrome))
+
+        known_site_match = re.fullmatch(
+            r'(?:otevri|otev\?i|open|spust|spus\?|zapni|launch|start) (?:mi )?([a-z0-9_-]+)',
+            normalized,
+            flags=re.IGNORECASE,
+        )
+        if known_site_match:
+            raw_target = known_site_match.group(1).strip()
+            known_url = self._known_web_alias_url(raw_target)
+            if known_url is not None:
+                return self._guarded_action(
+                    "app_launch",
+                    f"open url {known_url}",
+                    lambda: self.desktop_actions.open_url(known_url, prefer_chrome=True),
+                )
 
         search_match = re.search(
             r'(?:vyhledej|hledej|najdi na webu|najdi na google|search|google)(?: (?:v|ve|na) (?:chrome|google|webu|internetu))? (.+)$',
@@ -2054,7 +2209,7 @@ class LunaEngine:
                 return "Luna: Nenasla jsem slozku web, takze nemam co spustit."
 
             def run_web_server() -> dict[str, object]:
-                return self.desktop_actions.run_static_web_server(web_folder, port=port)
+                return self.desktop_actions.run_static_web_server(web_folder, port=port)  # type: ignore
 
             return self._guarded_action("project_run", f"run static web server {web_folder} on port {port}", run_web_server)
 
@@ -2067,7 +2222,7 @@ class LunaEngine:
             workspace = self._default_action_root()
 
             def run_project() -> dict[str, object]:
-                return self.desktop_actions.run_project(workspace)
+                return self.desktop_actions.run_project(workspace)  # type: ignore
 
             return self._guarded_action("project_run", f"run project {workspace}", run_project)
 
@@ -2705,14 +2860,18 @@ class LunaEngine:
         if workflow_data["system_message"]:
             return f"Luna: {workflow_data['system_message']}"
 
-        selected_mode = workflow_data.get("selected_mode", workflow_data.get("mode", "auto"))
+        # Ensure workflow_data values are strings (not None)
+        workflow_user_input: str = str(workflow_data.get("user_input") or cleaned_input)
+        mode: str = str(workflow_data.get("mode") or "auto")
+        
+        selected_mode: str = str(workflow_data.get("selected_mode") or mode or "auto")
         self.memory_coordinator.remember_user_input(cleaned_input, selected_mode)
 
         self._last_support_model_source = "unused"
         self._last_primary_model_source = "nvidia" if self.settings.model_type == "nvidia" else "lm_studio"
-        xeno_requested = self.xeno.should_consult(workflow_data["user_input"])
+        xeno_requested = self.xeno.should_consult(workflow_user_input)
         agent_route = self.agent_router.route(
-            workflow_data["user_input"],
+            workflow_user_input,
             extra_context=extra_context,
             current_action_mode=self._action_mode(),
             xeno_consulted=xeno_requested,
@@ -2730,14 +2889,14 @@ class LunaEngine:
                 "vision_active": agent_route.vision_active,
             },
         )
-        response_author = self._response_author(workflow_data["user_input"], xeno_consulted=xeno_consulted)
+        response_author = self._response_author(workflow_user_input, xeno_consulted=xeno_consulted)
         self.agent_run_state.update(owner=response_author, xeno_active=xeno_consulted, status="thinking")
-        internet_context = self._internet_context(workflow_data["user_input"])
-        hidden_xeno_support = self._hidden_xeno_support(workflow_data["user_input"])
+        internet_context = self._internet_context(workflow_user_input)
+        hidden_xeno_support = self._hidden_xeno_support(workflow_user_input)
         automation_summary = "\n".join(
             part
             for part in [
-                self.xeno.build_automation_summary(workflow_data["user_input"]),
+                self.xeno.build_automation_summary(workflow_user_input),
                 agent_route.summary,
                 self.tool_registry.summary_for_prompt(agent_route.action_scope),
             ]
@@ -2747,20 +2906,20 @@ class LunaEngine:
         if self.observe_mode_enabled:
             observer_context = self._observer_context(refresh=self._observer_refresh_enabled())
         coordination = self._build_internal_coordination(
-            user_input=workflow_data["user_input"],
+            user_input=workflow_user_input,
             response_author=response_author,
             xeno_consulted=xeno_consulted,
             automation_summary=automation_summary,
             hidden_support=hidden_xeno_support,
         )
         project_context = self._project_context()
-        library_context = self._library_context(workflow_data["user_input"])
+        library_context = self._library_context(workflow_user_input)
         session_context = self._session_context()
         live_visual_query = agent_route.live_visual_query
         voice_mode = agent_route.input_source == "voice"
         orchestrated = self.orchestrator.build(
-            user_input=workflow_data["user_input"],
-            base_instruction=workflow_data.get("instruction", ""),
+            user_input=workflow_user_input,
+            base_instruction=str(workflow_data.get("instruction", "") or ""),
             response_author=response_author,
             xeno_consulted=xeno_consulted,
             coordination=coordination,
@@ -2775,12 +2934,12 @@ class LunaEngine:
         self.last_coordination = orchestrated.coordination
         intelligence_level = self._normalized_intelligence_level()
         messages = self.build_messages(
-            user_input=workflow_data["user_input"],
-            mode=workflow_data["mode"],
+            user_input=user_input,
+            mode=mode,
             instruction=orchestrated.instruction,
             internet_context=internet_context,
-            selected_mode=workflow_data.get("selected_mode", "auto"),
-            reasoning_box=workflow_data.get("reasoning_box", self.settings.default_reasoning_box),
+            selected_mode=selected_mode,
+            reasoning_box=str(workflow_data.get("reasoning_box") or self.settings.default_reasoning_box),
             hidden_support=orchestrated.hidden_support,
             project_context=project_context,
             library_context=library_context,
@@ -2972,7 +3131,7 @@ class LunaEngine:
         next_task = self.get_next_agent_task(project_id)
         if next_task is None:
             return {"ok": False, "message": "No next agent task is available for this project."}
-        return self.run_agent_task_action(project_id, next_task)
+        return self.run_agent_task_action(project_id, next_task)  # type: ignore
 
     def run_next_agent_chain(self, project_id: str, max_steps: int = 3) -> dict[str, object]:
         self._reload_runtime_preferences()
@@ -2981,7 +3140,7 @@ class LunaEngine:
         if project is None:
             return {"ok": False, "message": "Project could not be found."}
 
-        preview_tasks: list[dict[str, object]] = []
+        preview_tasks: list[dict[str, Any]] = []
         for task in project.tasks:
             status = str(task.get("status", "pending")).strip().lower()
             if status == "completed":
@@ -2995,7 +3154,7 @@ class LunaEngine:
         if bool(self._runtime_budget_profile()["xeno_model_support"]):
             agent_model_support = self.xeno.task_agent.build_model_execution_support(
                 objective=project.brief,
-                tasks=preview_tasks,
+                tasks=preview_tasks,  # type: ignore
                 model_generate=self._support_generate,
                 intelligence_level=intelligence_level,
             )
@@ -3008,7 +3167,7 @@ class LunaEngine:
             next_task = self.get_next_agent_task(project_id)
             if next_task is None:
                 break
-            result = self.run_agent_task_action(project_id, next_task)
+            result = self.run_agent_task_action(project_id, next_task)  # type: ignore
             if not result.get("ok"):
                 if results:
                     updated = self.projects.get_project(project_id)
@@ -3074,7 +3233,7 @@ class LunaEngine:
         if bool(self._runtime_budget_profile()["xeno_model_support"]):
             task_model_support = self.xeno.task_agent.build_model_execution_support(
                 objective=project.brief,
-                tasks=[task_data],
+                tasks=[task_data],  # type: ignore
                 model_generate=self._support_generate,
                 intelligence_level=self._normalized_intelligence_level(),
             )
@@ -3099,7 +3258,7 @@ class LunaEngine:
                     project_name=project.name,
                     brief=project.brief,
                     next_step=project.next_step,
-                    task=task_data,
+                    task=task_data,  # type: ignore
                     workspace_settings=self.user_settings.data,
                 )
             except OSError as error:
@@ -3253,7 +3412,7 @@ class LunaEngine:
         }
 
     def generate_project_blueprint(self, user_input: str) -> str:
-        return self.generate_project_package(user_input).get("blueprint_text", "")
+        return str(self.generate_project_package(user_input).get("blueprint_text", ""))
 
     def describe_xeno(self) -> str:
         return self.xeno.describe()

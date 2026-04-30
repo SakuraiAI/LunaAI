@@ -1,4 +1,4 @@
-﻿from importlib import import_module
+from importlib import import_module
 from typing import Protocol, cast
 
 from app.tools.internet import InternetTool
@@ -29,4 +29,4 @@ class RuntimeStatusFormatter:
             f"Internet: {'on' if self.internet.is_enabled() else 'off'} ({self.internet.mode()})\n"
             f"Reasoning default: {self.settings.default_reasoning_box}\n"
             f"Memory review interval: {self.settings.memory_review_interval}"
-        )
+        )

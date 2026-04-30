@@ -1024,6 +1024,13 @@ Open `index.html` in a browser to preview it.
 
     def open_url(self, url: str, *, prefer_chrome: bool = False) -> dict[str, str | bool]:
         normalized_url = self._normalize_url(url)
+        expected_domain = (
+            normalized_url.lower()
+            .removeprefix("https://")
+            .removeprefix("http://")
+            .split("/", 1)[0]
+            .removeprefix("www.")
+        )
         chrome_path = self._find_chrome_path() if prefer_chrome else None
         if chrome_path is not None:
             subprocess.Popen([str(chrome_path), normalized_url])
@@ -1043,6 +1050,9 @@ Open `index.html` in a browser to preview it.
             category="app_launch",
             action_key="open_url",
         )
+        result["target_url"] = normalized_url
+        result["target_domain"] = expected_domain
+        result["expected_app_key"] = "browser"
         result["message"] = (
             f"Otevřela jsem {normalized_url}."
             if focused
@@ -1065,10 +1075,15 @@ Open `index.html` in a browser to preview it.
         result = self.open_url(url, prefer_chrome=prefer_chrome)
         result["message"] = f"Hledám na webu: {cleaned_query}"
         result["action_key"] = "search_web"
+        result["search_query"] = cleaned_query
         return result
 
     def open_browser(self, *, prefer_chrome: bool = True) -> dict[str, str | bool]:
-        return self.open_url("https://www.google.com", prefer_chrome=prefer_chrome)
+        result = self.open_url("https://www.google.com", prefer_chrome=prefer_chrome)
+        result["action_key"] = "open_browser"
+        result["message"] = "Otevřela jsem Google Chrome."
+        result["target_domain"] = ""
+        return result
 
     def press_shortcut(self, shortcut: str) -> dict[str, str | bool]:
         self._require_windows_input()
@@ -1261,11 +1276,11 @@ Open `index.html` in a browser to preview it.
             )
 
         command = [sys.executable, "-m", "http.server", str(port)]
-        popen_kwargs: dict[str, object] = {"cwd": str(target_folder)}
         creation_flags = getattr(subprocess, "CREATE_NEW_CONSOLE", 0) if os.name == "nt" else 0
         if creation_flags:
-            popen_kwargs["creationflags"] = creation_flags
-        subprocess.Popen(command, **popen_kwargs)
+            subprocess.Popen(command, cwd=str(target_folder), creationflags=creation_flags)
+        else:
+            subprocess.Popen(command, cwd=str(target_folder))
 
         url = f"http://localhost:{port}"
         try:
@@ -1309,11 +1324,11 @@ Open `index.html` in a browser to preview it.
             )
 
         command, label = detected
-        popen_kwargs: dict[str, object] = {"cwd": str(target_workspace)}
         creation_flags = getattr(subprocess, "CREATE_NEW_CONSOLE", 0) if os.name == "nt" else 0
         if creation_flags:
-            popen_kwargs["creationflags"] = creation_flags
-        subprocess.Popen(command, **popen_kwargs)
+            subprocess.Popen(command, cwd=str(target_workspace), creationflags=creation_flags)
+        else:
+            subprocess.Popen(command, cwd=str(target_workspace))
 
         return self._result(
             ok=True,

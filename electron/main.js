@@ -10,11 +10,14 @@ import { getApplicationsState, launchApplication, updateApplicationPath } from '
 import { runLunaBridge } from './services/lunaBridge.js';
 import { createSystemMetricsReader } from './services/systemMetrics.js';
 import { registerActionIpc } from './ipc/actionIpc.js';
+import { registerAgentIpc } from './ipc/agentIpc.js';
 
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const isDev = !app.isPackaged;
+const rendererDevServerUrl = process.env.LUNA_ELECTRON_RENDERER_URL || 'http://127.0.0.1:5173';
+const useRendererDevServer = process.env.npm_lifecycle_event === 'dev'
+  || process.env.LUNA_ELECTRON_USE_DEV_SERVER === '1';
 
 let mainWindow = null;
 let assistantWindow = null;
@@ -109,10 +112,20 @@ function createWindow() {
     mainWindow?.show();
   });
 
-  if (isDev) {
-    mainWindow.loadURL('http://127.0.0.1:5173');
+  mainWindow.webContents.on('did-fail-load', (_event, errorCode, errorDescription, validatedURL) => {
+    console.error('Electron renderer failed to load', {
+      errorCode,
+      errorDescription,
+      validatedURL,
+      useRendererDevServer,
+    });
+  });
+
+  const builtIndexPath = path.join(app.getAppPath(), 'dist', 'index.html');
+  if (useRendererDevServer) {
+    mainWindow.loadURL(rendererDevServerUrl);
   } else {
-    mainWindow.loadFile(path.join(app.getAppPath(), 'dist', 'index.html'));
+    mainWindow.loadFile(builtIndexPath);
   }
 }
 
@@ -385,6 +398,7 @@ app.whenReady().then(() => {
     ipcMain,
     getMainWindow: () => mainWindow,
   });
+  registerAgentIpc({ ipcMain });
 
   createWindow();
   createTray();
