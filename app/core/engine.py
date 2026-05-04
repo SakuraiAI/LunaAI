@@ -2345,6 +2345,10 @@ class LunaEngine:
         if model_action_result is not None:
             return model_action_result
 
+        local_path_result = self._try_local_path_action(user_input)
+        if local_path_result is not None:
+            return local_path_result
+
         parts = self._split_action_chain(user_input)
         if len(parts) > 1:
             category = self._chain_action_category(parts)
@@ -2363,9 +2367,6 @@ class LunaEngine:
 
             return self._guarded_action(category, f"chain action: {title}", run_chain)
 
-        local_path_result = self._try_local_path_action(user_input)
-        if local_path_result is not None:
-            return local_path_result
         return self._try_local_app_action(user_input)
 
     def _try_local_path_action(self, user_input: str) -> str | None:

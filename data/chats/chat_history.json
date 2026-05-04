@@ -3725,6 +3725,16 @@
         "role": "assistant",
         "content": "{\n\"action\": \"open_app\",\n\"app\": \"chrome\",\n\"target\": null\n}",
         "author": "Luna"
+      },
+      {
+        "role": "user",
+        "content": "spust chrome a dej youtube",
+        "author": "You"
+      },
+      {
+        "role": "assistant",
+        "content": "Luna: Otevřela jsem https://www.youtube.com. Overeni: zmena na plose byla detekovana; aktivni je Web browser (watching or browsing YouTube). Okno: YouTube - Google Chrome. Vision: LunaAI successfully opened YouTube using Chrome as shown in the desktop action logs.",
+        "author": "Luna"
       }
     ],
     "324043127de3": [

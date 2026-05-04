@@ -976,6 +976,20 @@ Open `index.html` in a browser to preview it.
                 return candidate
         return None
 
+    def _decode_process_output(self, output: bytes | str | None) -> str:
+        if output is None:
+            return ""
+        if isinstance(output, str):
+            return output
+        if output.startswith((b"\xff\xfe", b"\xfe\xff")):
+            return output.decode("utf-16", errors="ignore")
+        for encoding in ("utf-8", "cp1250", "mbcs"):
+            try:
+                return output.decode(encoding, errors="ignore")
+            except LookupError:
+                continue
+        return output.decode(errors="ignore")
+
     def _is_process_running(self, process_names: set[str]) -> bool:
         if os.name != "nt":
             return False
@@ -987,13 +1001,14 @@ Open `index.html` in a browser to preview it.
                 completed = subprocess.run(
                     ["tasklist.exe", "/FI", f"IMAGENAME eq {process_name}"],
                     capture_output=True,
-                    text=True,
+                    text=False,
                     timeout=3,
                     check=False,
                 )
             except (OSError, subprocess.TimeoutExpired):
                 continue
-            if completed.returncode == 0 and process_name in completed.stdout.lower():
+            output = self._decode_process_output(completed.stdout).lower()
+            if completed.returncode == 0 and process_name in output:
                 return True
         return False
 
