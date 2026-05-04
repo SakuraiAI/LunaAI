@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Callable, Any
+from typing import Callable, Any, Mapping
 from collections import OrderedDict
+import json
+import os
 import re
 import time
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
@@ -10,6 +12,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from config.settings import AppSettings
 from app.core.action_log import ActionLogStore
 from app.core.agent_action_router import AgentActionRouter, AgentRoute
+from app.core.agent_loop import AgentLoopResult, AgentLoopStep
 from app.core.agent_run_state import AgentRunStateStore
 from app.core.agent_tool_registry import AgentToolRegistry, ToolSpec
 from app.core.agent_trace import AgentTraceStore
@@ -116,6 +119,7 @@ class LunaEngine:
         self._action_mode_override: str | None = None
         self.observe_mode_enabled = False
         self.last_desktop_observation: dict[str, object] | None = None
+        self.live_screen_summary: str = ""
         self.last_model_debug = ""
         self._last_support_model_source = "unused"
         self._last_primary_model_source = "nvidia" if self.settings.model_type == "nvidia" else "lm_studio"
@@ -536,9 +540,9 @@ class LunaEngine:
         override = str(self._action_mode_override or "").strip().lower()
         if override in {"ask", "auto", "block"}:
             return override
-        mode = str(self.user_settings.data.agent_execution_mode or "ask").strip().lower()
+        mode = str(self.user_settings.data.agent_execution_mode or "auto").strip().lower()
         if mode not in {"ask", "auto", "block"}:
-            return "ask"
+            return "auto"
         return mode
 
     def _is_action_allowed(self, category: str) -> bool:
@@ -550,6 +554,8 @@ class LunaEngine:
         if category == "file_read":
             return bool(workspace.allow_path_open)
         if category == "file_change":
+            return bool(workspace.allow_file_changes)
+        if category == "dependency_install":
             return bool(workspace.allow_file_changes)
         if category == "project_run":
             return bool(workspace.allow_app_launch)
@@ -633,6 +639,7 @@ class LunaEngine:
         workspace = self.user_settings.data
         app_fields = OrderedDict([
             ("VS Code", workspace.vscode_path),
+            ("Google Chrome", workspace.chrome_path),
             ("Blender", workspace.blender_path),
             ("Unreal Engine 5", workspace.unreal_engine_path),
             ("Unity", workspace.unity_path),
@@ -691,6 +698,9 @@ class LunaEngine:
 
     def _remember_observation(self, observation: dict[str, object], *, source: str = "observe") -> None:
         self.last_desktop_observation = observation
+        visual_summary = str(observation.get("vision_summary", "") or "").strip()
+        if visual_summary:
+            self.live_screen_summary = visual_summary
         project = self.projects.get_current_project()
         if project is None:
             return
@@ -1010,6 +1020,41 @@ class LunaEngine:
 
     def _handle_local_capability_command(self, user_input: str) -> str | None:
         normalized = ascii_fold_text(" ".join(user_input.strip().lower().split()))
+        auto_mode_triggers = {
+            "agent auto",
+            "agent automaticky",
+            "automaticky agent",
+            "zapni automaticky agent",
+            "zapni operator mod",
+            "operator mode",
+            "plne automaticky",
+            "plne automaticky agent",
+        }
+        if normalized in auto_mode_triggers:
+            summary = self.set_system_control_profile("operator")
+            return "Luna: Agent je prepnuty do automatickeho operator rezimu. Bezpecne akce budu spoustet rovnou.\n" + summary
+
+        ask_mode_triggers = {
+            "agent ask",
+            "agent potvrzeni",
+            "vyzaduj potvrzeni",
+            "zapni potvrzeni",
+            "assist mode",
+        }
+        if normalized in ask_mode_triggers:
+            summary = self.set_system_control_profile("assist")
+            return "Luna: Agent je zpatky v potvrzovacim rezimu.\n" + summary
+
+        block_mode_triggers = {
+            "agent block",
+            "zablokuj agenta",
+            "vypni akce agenta",
+            "observe mode",
+        }
+        if normalized in block_mode_triggers:
+            summary = self.set_system_control_profile("observe")
+            return "Luna: Lokalne akce agenta jsou blokovane, zustava jen pozorovani a odpovedi.\n" + summary
+
         trace_triggers = {
             "agent status",
             "agent trace",
@@ -1038,6 +1083,24 @@ class LunaEngine:
         }
         if normalized in run_state_triggers:
             return self.format_agent_run_state()
+
+        loop_triggers = {
+            "agent loop",
+            "spust agent loop",
+            "spust agenta",
+            "pust agenta",
+            "autonomni loop",
+            "automaticky loop",
+            "run agent loop",
+            "dodelat ukoly",
+            "udelej dalsi kroky",
+        }
+        if normalized in loop_triggers:
+            project = self.projects.get_current_project()
+            if project is None:
+                return "Luna: Nemam aktivni projekt, na kterem bych pustila agent loop."
+            result = self.run_next_agent_chain(project.id, max_steps=5)
+            return "Luna: " + repair_text(str(result.get("message", "Agent loop skoncil."))).strip()
 
         tool_triggers = {
             "agent tools",
@@ -1330,14 +1393,20 @@ class LunaEngine:
             "path_open": "Otevření cesty nemění soubory, jen zobrazí existující soubor nebo složku.",
             "file_read": "Čtení souboru nebo výpis složky nic nemění v počítači, pouze vrátí obsah nebo seznam položek.",
             "project_run": "Spuštění projektu je lokální akce a může otevřít proces nebo prohlížeč, proto respektuje potvrzení.",
-            "system_input": "Systémový vstup ovládá aktivní okno, proto ho držím za potvrzením a provádím jen přesný požadovaný krok.",
+            "dependency_install": "Instalace balicku meni zavislosti projektu, proto vyzaduje potvrzeni i v automatickem rezimu.",
+            "system_input": "Systemovy vstup ovlada aktivni okno, proto ho v auto rezimu provadim jen jako presny, omezeny krok.",
         }
         if category in simple_reasons:
+            requires_confirmation = self._action_mode() == "ask"
+            if category == "system_input":
+                requires_confirmation = self._action_mode() != "auto"
+            if category == "dependency_install":
+                requires_confirmation = True
             return {
                 "status": "approved",
                 "intent": category,
                 "risk": "low" if category in {"path_open", "file_read"} else "medium",
-                "requiresConfirmation": True if category == "system_input" else self._action_mode() == "ask",
+                "requiresConfirmation": requires_confirmation,
                 "recommendedAction": title,
                 "reason": simple_reasons[category] + route_note + tool_note,
                 "category": category,
@@ -1441,7 +1510,7 @@ class LunaEngine:
             )
             return self._format_action_result_for_chat(result)
         mode = self._action_mode()
-        force_confirmation = category in {"system_input"}
+        force_confirmation = (category in {"system_input"} and mode != "auto") or category in {"dependency_install"}
         if mode == "block":
             result = self._coerce_action_result(
                 {
@@ -1760,12 +1829,37 @@ class LunaEngine:
         home = Path.home()
         for candidate in [
             home / "Desktop",
+            home / "Desktop" / "Aplikace",
             home / "Documents",
             home / "Downloads",
+            home / "Pictures",
+            home / "Videos",
+            home / "Music",
             self.desktop_actions.workspace_root,
         ]:
             if candidate.exists() and candidate not in roots:
                 roots.append(candidate)
+        return roots
+
+    def _pc_app_search_roots(self) -> list[Path]:
+        roots = [*self._pc_file_search_roots()]
+        home = Path.home()
+        for env_name, suffix in [
+            ("PROGRAMFILES", ""),
+            ("PROGRAMFILES(X86)", ""),
+            ("LOCALAPPDATA", "Programs"),
+            ("APPDATA", "Microsoft/Windows/Start Menu/Programs"),
+            ("PROGRAMDATA", "Microsoft/Windows/Start Menu/Programs"),
+        ]:
+            base = str(os.environ.get(env_name, "") or "").strip()
+            if not base:
+                continue
+            candidate = Path(base) / suffix if suffix else Path(base)
+            if candidate.exists() and candidate not in roots:
+                roots.append(candidate)
+        desktop_apps = home / "Desktop" / "Aplikace"
+        if desktop_apps.exists() and desktop_apps not in roots:
+            roots.append(desktop_apps)
         return roots
 
     def _find_named_target(self, target_name: str, *, prefer_directory: bool | None = None) -> Path | None:
@@ -1802,6 +1896,27 @@ class LunaEngine:
                 "code.exe",
             ]
         )
+
+    def _known_app_key(self, text: str) -> str:
+        lowered = ascii_fold_text(str(text or "")).lower().strip()
+        app_aliases = {
+            "vscode": ["vscode", "vs code", "vscodu", "vs codu", "visual studio code", "code.exe"],
+            "chrome": ["chrome", "chrom", "google chrome", "prohlizec", "browser"],
+            "blender": ["blender"],
+            "unreal": ["unreal", "unreal engine", "unreal engine 5", "ue5"],
+            "unity": ["unity"],
+            "photoshop": ["photoshop"],
+            "davinci": ["davinci", "davinci resolve"],
+            "premiere": ["premiere", "premiere pro"],
+            "after_effects": ["after effects", "aftereffects"],
+            "figma": ["figma"],
+            "fl_studio": ["fl studio"],
+            "substance": ["substance", "substance painter", "substance 3d painter"],
+        }
+        for app_key, aliases in app_aliases.items():
+            if lowered in aliases or any(alias in lowered for alias in aliases):
+                return app_key
+        return ""
 
     def _find_recent_workspace_target(self, target_name: str, *, prefer_directory: bool | None = None) -> Path | None:
         clean_name = target_name.strip().strip('"').strip("'").lower()
@@ -1880,8 +1995,15 @@ class LunaEngine:
             "go to",
             "bez na",
             "naviguj na",
+            "najdi",
+            "hledej",
+            "find",
+            "kde je",
             "vyhledej",
             "search",
+            "google",
+            "dej",
+            "hod",
             "klikni",
             "click",
             "stiskni",
@@ -1898,18 +2020,291 @@ class LunaEngine:
             "yt": "https://www.youtube.com",
             "google": "https://www.google.com",
             "gmail": "https://mail.google.com",
+            "outlook": "https://outlook.live.com/mail",
             "github": "https://github.com",
             "reddit": "https://www.reddit.com",
             "discord": "https://discord.com/app",
             "chatgpt": "https://chatgpt.com",
+            "openai": "https://openai.com",
             "x": "https://x.com",
             "twitter": "https://x.com",
             "facebook": "https://www.facebook.com",
             "instagram": "https://www.instagram.com",
             "twitch": "https://www.twitch.tv",
             "netflix": "https://www.netflix.com",
+            "unreal": "https://www.unrealengine.com",
+            "unreal engine": "https://www.unrealengine.com",
+            "ue5": "https://www.unrealengine.com",
+            "epic games": "https://www.epicgames.com",
+            "blender": "https://www.blender.org",
+            "nvidia": "https://www.nvidia.com",
+            "nvidia build": "https://build.nvidia.com",
+            "nvidia aiq": "https://build.nvidia.com/nvidia/aiq",
+            "langchain": "https://docs.langchain.com",
+            "npm": "https://www.npmjs.com",
+            "react": "https://react.dev",
+            "vite": "https://vite.dev",
+            "electron": "https://www.electronjs.org",
+            "python": "https://www.python.org",
         }
         return alias_map.get(alias)
+
+    def _clean_search_query(self, value: str) -> str:
+        cleaned = repair_text(str(value or "")).strip().strip('"').strip("'")
+        cleaned = re.sub(r"\s+", " ", cleaned).strip(" .,:;!?")
+        cleaned = re.sub(r"^(?:mi\s+)?(?:odkaz|link|url)\s+(?:na|to)\s+", "", cleaned, flags=re.IGNORECASE)
+        cleaned = re.sub(r"^(?:mi\s+)?(?:stranku|stranka|web|website)\s+", "", cleaned, flags=re.IGNORECASE)
+        cleaned = re.sub(r"^(?:mi\s+)?(?:aplikaci|program|app)\s+", "", cleaned, flags=re.IGNORECASE)
+        cleaned = re.sub(r"\s+(?:prosim|please)$", "", cleaned, flags=re.IGNORECASE).strip(" .,:;!?")
+        return cleaned
+
+    def _extract_model_json_object(self, text: str) -> dict[str, object] | None:
+        cleaned = repair_text(str(text or "")).strip()
+        if not cleaned:
+            return None
+
+        fenced = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", cleaned, flags=re.IGNORECASE | re.DOTALL)
+        if fenced:
+            cleaned = fenced.group(1).strip()
+        else:
+            start = cleaned.find("{")
+            end = cleaned.rfind("}")
+            if start == -1 or end == -1 or end <= start:
+                return None
+            cleaned = cleaned[start : end + 1]
+
+        try:
+            payload = json.loads(cleaned)
+        except json.JSONDecodeError:
+            return None
+        if not isinstance(payload, dict):
+            return None
+        return payload
+
+    def _plan_agent_action_with_model(self, user_input: str) -> dict[str, object] | None:
+        cleaned_input = repair_text(str(user_input or "")).strip()
+        if not cleaned_input:
+            return None
+
+        route = self._active_agent_route
+        route_context = route.summary if route is not None else ""
+        project_context = self._project_context()
+        desktop_context = self._observer_context(refresh=False)
+        tools = self.tool_registry.summary_for_prompt()
+        alias_lines = "\n".join(
+            [
+                "- youtube -> https://www.youtube.com",
+                "- google -> https://www.google.com",
+                "- gmail -> https://mail.google.com",
+                "- unreal engine -> https://www.unrealengine.com",
+                "- blender -> https://www.blender.org",
+                "- github -> https://github.com",
+                "- instagram -> https://www.instagram.com",
+            ]
+        )
+
+        messages = [
+            {
+                "role": "system",
+                "content": (
+                    "You are LunaAI's local agent planner. "
+                    "Your only job is to convert the user's request into ONE safe structured tool call. "
+                    "Return JSON only, no markdown and no explanation. "
+                    "Never claim that anything was executed. "
+                    "If the user asks for multiple browser steps like 'open chrome and put youtube', choose open_url with prefer_chrome=true. "
+                    "If the request is destructive, unsafe, vague, or needs unsupported automation, return tool='none'. "
+                    "Allowed tools: open_url, open_app, search_web, find_app_path, find_path, read_file, list_folder, run_command, get_system_info, none. "
+                    "Use this JSON shape exactly: "
+                    "{\"tool\":\"open_url\",\"args\":{\"url\":\"https://www.youtube.com\",\"prefer_chrome\":true},\"category\":\"app_launch\",\"requiresConfirmation\":false,\"reason\":\"short\"}."
+                ),
+            },
+            {
+                "role": "user",
+                "content": (
+                    f"User request: {cleaned_input}\n\n"
+                    f"{route_context}\n\n"
+                    f"{tools}\n\n"
+                    "Known web aliases:\n"
+                    f"{alias_lines}\n\n"
+                    f"Project context:\n{project_context or 'none'}\n\n"
+                    f"Desktop context:\n{desktop_context or 'none'}"
+                ),
+            },
+        ]
+
+        try:
+            raw_plan = self._support_generate(messages)
+        except Exception as error:
+            self._trace_agent(
+                phase="agent_model_plan",
+                status="failed",
+                detail=f"Model planner failed: {error}",
+                metadata={"user_input": cleaned_input[:180]},
+            )
+            return None
+
+        plan = self._extract_model_json_object(raw_plan)
+        if plan is None:
+            self._trace_agent(
+                phase="agent_model_plan",
+                status="fallback",
+                detail="Model did not return valid JSON action plan.",
+                metadata={"raw": repair_text(str(raw_plan or ""))[:400]},
+            )
+            return None
+
+        tool = ascii_fold_text(str(plan.get("tool", "") or plan.get("action", ""))).lower().strip()
+        allowed_tools = {
+            "open_url",
+            "open_app",
+            "search_web",
+            "find_app_path",
+            "find_path",
+            "read_file",
+            "list_folder",
+            "run_command",
+            "get_system_info",
+            "none",
+        }
+        if tool not in allowed_tools or tool == "none":
+            return None
+        plan["tool"] = tool
+        self._trace_agent(
+            phase="agent_model_plan",
+            status="selected",
+            detail=str(plan.get("reason", "") or f"Model selected {tool}."),
+            metadata={"tool": tool, "args": plan.get("args", {})},
+        )
+        return plan
+
+    def _execute_model_agent_action(self, user_input: str, plan: dict[str, object]) -> str | None:
+        tool = ascii_fold_text(str(plan.get("tool", ""))).lower().strip()
+        raw_args = plan.get("args", {})
+        args: dict[str, object] = {str(key): value for key, value in raw_args.items()} if isinstance(raw_args, dict) else {}
+        normalized_input = ascii_fold_text(str(user_input or "")).lower()
+
+        if tool == "open_url":
+            raw_target = str(args.get("url") or args.get("target") or "").strip()
+            if not raw_target:
+                return None
+            raw_url = self._known_web_alias_url(raw_target) or raw_target
+            prefer_chrome = bool(args.get("prefer_chrome")) or "chrome" in normalized_input or "chrom" in normalized_input
+            return self._guarded_action(
+                "app_launch",
+                f"model open url {raw_url}",
+                lambda: self.desktop_actions.open_url(raw_url, prefer_chrome=prefer_chrome),
+            )
+
+        if tool == "search_web":
+            query = self._clean_search_query(str(args.get("query") or args.get("target") or ""))
+            if not query:
+                return None
+            prefer_chrome = bool(args.get("prefer_chrome")) or "chrome" in normalized_input or "chrom" in normalized_input
+            return self._guarded_action(
+                "app_launch",
+                f"model search web for {query}",
+                lambda: self.desktop_actions.search_web(query, prefer_chrome=prefer_chrome),
+            )
+
+        if tool == "open_app":
+            app_key = self._known_app_key(str(args.get("app") or args.get("target") or user_input))
+            if not app_key:
+                return None
+            if app_key == "chrome":
+                return self._guarded_action(
+                    "app_launch",
+                    "model open Chrome",
+                    lambda: self.desktop_actions.open_browser(prefer_chrome=True),
+                )
+
+            current_project = self.projects.get_current_project()
+            project_name = "" if app_key == "vscode" else (current_project.name if current_project is not None else "")
+
+            def launch_app() -> str:
+                result = self.open_connected_app(app_key, project_name, log_result=False)
+                message = str(result.get("message", "")).strip()
+                if result.get("ok"):
+                    return message
+                raise OSError(message or "Aplikaci se nepodarilo otevrit.")
+
+            return self._guarded_action("app_launch", f"model open {app_key}", launch_app)
+
+        if tool == "find_app_path":
+            app_key = self._known_app_key(str(args.get("app") or args.get("target") or user_input))
+            if not app_key:
+                return None
+            return self._guarded_action(
+                "file_read",
+                f"model find app path {app_key}",
+                lambda: self.desktop_actions.describe_app_path(app_key, self.user_settings.data),
+            )
+
+        if tool == "get_system_info":
+            return self._guarded_action("file_read", "model get system info", lambda: self.desktop_actions.get_system_info())
+
+        if tool == "find_path":
+            query = self._clean_search_query(str(args.get("query") or args.get("target") or ""))
+            if not query:
+                return None
+            prefer_directory_raw = args.get("prefer_directory")
+            prefer_directory = prefer_directory_raw if isinstance(prefer_directory_raw, bool) else None
+            return self._guarded_action(
+                "file_read",
+                f"model find {query}",
+                lambda: self.desktop_actions.find_paths(
+                    self._pc_file_search_roots(),
+                    query,
+                    prefer_directory=prefer_directory,
+                ),
+            )
+
+        if tool in {"read_file", "list_folder"}:
+            raw_path = str(args.get("path") or args.get("target") or "").strip()
+            if not raw_path:
+                return None
+            target = self._resolve_pc_target(raw_path, prefer_directory=(tool == "list_folder"))
+            if target is None:
+                return None
+            if tool == "read_file":
+                return self._guarded_action(
+                    "file_read",
+                    f"model read file {target}",
+                    lambda: self.desktop_actions.read_text_file(target),
+                )
+            return self._guarded_action(
+                "file_read",
+                f"model list folder {target}",
+                lambda: self.desktop_actions.list_folder(target),
+            )
+
+        if tool == "run_command":
+            command_text = str(args.get("command") or "").strip()
+            if not command_text:
+                return None
+            category = "dependency_install" if command_text.lower().startswith(("npm install", "npm i")) else "project_run"
+            workspace = self._default_action_root()
+            return self._guarded_action(
+                category,
+                f"model run command {command_text}",
+                lambda: self.desktop_actions.run_safe_command(command_text, workspace),
+            )
+
+        return None
+
+    def _try_model_agent_action(self, user_input: str) -> str | None:
+        plan = self._plan_agent_action_with_model(user_input)
+        if plan is None:
+            return None
+        try:
+            return self._execute_model_agent_action(user_input, plan)
+        except OSError as error:
+            self._trace_agent(
+                phase="agent_model_execute",
+                status="failed",
+                detail=str(error),
+                metadata={"tool": plan.get("tool", "")},
+            )
+            return None
 
     def _chain_action_category(self, parts: list[str]) -> str:
         lowered = " ".join(parts).lower()
@@ -1919,7 +2314,9 @@ class LunaEngine:
             return "file_read"
         if any(token in lowered for token in ["stiskni", "zmackni", "press ", "klaves", "shortcut", "klikni", "click", "napis text", "type text", "system input"]):
             return "system_input"
-        if any(token in lowered for token in ["vscode", "vs code", "blender", "unreal", "unity", "photoshop", "davinci", "premiere", "after effects", "figma", "fl studio", "substance", "chrome", "browser", "prohlizec", "http://", "https://", "localhost", "vyhledej", "search", "google"]):
+        if any(token in lowered for token in ["run command", "spust prikaz", "npm start", "npm run", "npm install", "python main.py", "python src/main.py", "python -m pytest", "pytest", "get system info", "info o systemu"]):
+            return "project_run"
+        if any(token in lowered for token in ["vscode", "vs code", "blender", "unreal", "unity", "photoshop", "davinci", "premiere", "after effects", "figma", "fl studio", "substance", "chrome", "chrom", "browser", "prohlizec", "http://", "https://", "localhost", "vyhledej", "search", "google", "dej", "hod"]):
             return "app_launch"
         return "path_open"
 
@@ -1944,6 +2341,10 @@ class LunaEngine:
         return cleaned
 
     def _try_local_action(self, user_input: str) -> str | None:
+        model_action_result = self._try_model_agent_action(user_input)
+        if model_action_result is not None:
+            return model_action_result
+
         parts = self._split_action_chain(user_input)
         if len(parts) > 1:
             category = self._chain_action_category(parts)
@@ -1975,8 +2376,8 @@ class LunaEngine:
 
         browser_destination_match = re.fullmatch(
             r'(?:otevri|otev\?i|open|spust|spus\?|zapni|launch|start|jdi na|go to|naviguj na) '
-            r'(?:mi )?(?:google chrome|chrome|prohlizec|browser)\s+'
-            r'(?:a\s+)?(?:jdi na|go to|open|otevri|otev\?i|naviguj na)\s+(.+)$',
+            r'(?:mi )?(?:google chrome|chrome|chrom|prohlizec|browser)\s+'
+            r'(?:a\s+)?(?:jdi na|go to|open|otevri|otev\?i|naviguj na|dej(?:\s+tam)?(?:\s+na)?|hod(?:\s+tam)?(?:\s+na)?)\s*(.+)$',
             normalized,
             flags=re.IGNORECASE,
         )
@@ -1996,8 +2397,23 @@ class LunaEngine:
         )
         if navigation_match:
             raw_target = navigation_match.group(1).strip().rstrip(".,;)]}\"'")
-            if raw_target.lower() in {"google chrome", "chrome", "prohlizec", "browser"}:
+            if raw_target.lower() in {"google chrome", "chrome", "chrom", "prohlizec", "browser"}:
                 return self._guarded_action("app_launch", "open Chrome", lambda: self.desktop_actions.open_browser(prefer_chrome=True))
+            raw_url = self._known_web_alias_url(raw_target) or raw_target
+            if self._known_web_alias_url(raw_target) is not None or re.search(r"(https?://|localhost:|www\.|[a-z0-9-]+\.[a-z]{2,})", raw_url, flags=re.IGNORECASE):
+                return self._guarded_action(
+                    "app_launch",
+                    f"open url {raw_url}",
+                    lambda: self.desktop_actions.open_url(raw_url, prefer_chrome=True),
+                )
+
+        quick_web_target_match = re.fullmatch(
+            r'(?:dej|hod) ?(?:mi )?(?:tam )?(?:na )?(.+)$',
+            normalized,
+            flags=re.IGNORECASE,
+        )
+        if quick_web_target_match:
+            raw_target = self._clean_search_query(quick_web_target_match.group(1))
             raw_url = self._known_web_alias_url(raw_target) or raw_target
             if self._known_web_alias_url(raw_target) is not None or re.search(r"(https?://|localhost:|www\.|[a-z0-9-]+\.[a-z]{2,})", raw_url, flags=re.IGNORECASE):
                 return self._guarded_action(
@@ -2034,16 +2450,82 @@ class LunaEngine:
                 return "Luna: Ten soubor jsem v pocitaci nenasla."
             return self._guarded_action("file_read", f"read file {target}", lambda: self.desktop_actions.read_text_file(target))
 
+        system_info_match = re.fullmatch(
+            r'(?:system info|get system info|info o systemu|informace o systemu|stav pc|pc info)',
+            normalized,
+            flags=re.IGNORECASE,
+        )
+        if system_info_match:
+            return self._guarded_action("file_read", "get system info", lambda: self.desktop_actions.get_system_info())
+
+        web_lookup_patterns = [
+            r'(?:najdi|hledej|find|vyhledej|search) (?:mi )?(?:odkaz|link|url) (?:na|to) (.+)$',
+            r'(?:najdi|hledej|find|vyhledej|search) (?:mi )?(?:stranku|stranka|web|website) (.+)$',
+            r'(?:najdi|hledej|find|vyhledej|search) (?:mi )?(?:na webu|na internetu|online) (.+)$',
+            r'(?:kde je|where is) (?:web|stranka|website|odkaz|link) (?:na|to)? ?(.+)$',
+        ]
+        for pattern in web_lookup_patterns:
+            match = re.search(pattern, normalized, flags=re.IGNORECASE)
+            if not match:
+                continue
+            query = self._clean_search_query(match.group(1))
+            if not query:
+                return "Luna: Chybi, co mam hledat."
+            known_url = self._known_web_alias_url(query)
+            if known_url is not None:
+                return self._guarded_action(
+                    "app_launch",
+                    f"open url {known_url}",
+                    lambda: self.desktop_actions.open_url(known_url, prefer_chrome=True),
+                )
+            return self._guarded_action(
+                "app_launch",
+                f"search web for {query}",
+                lambda: self.desktop_actions.search_web(query, prefer_chrome=True),
+            )
+
+        find_app_patterns = [
+            r'(?:najdi|hledej|find) (?:mi )?(?:aplikaci|program|app) (.+)$',
+            r'(?:kde je|where is) (?:aplikace|program|app) (.+)$',
+        ]
+        for pattern in find_app_patterns:
+            match = re.search(pattern, normalized, flags=re.IGNORECASE)
+            if not match:
+                continue
+            query = self._clean_search_query(match.group(1))
+            if not query:
+                return "Luna: Chybi nazev aplikace, kterou mam hledat."
+            app_key = self._known_app_key(query)
+            if app_key:
+                return self._guarded_action(
+                    "file_read",
+                    f"find app path {app_key}",
+                    lambda: self.desktop_actions.describe_app_path(app_key, self.user_settings.data),
+                )
+            return self._guarded_action(
+                "file_read",
+                f"find app {query}",
+                lambda: self.desktop_actions.find_paths(
+                    self._pc_app_search_roots(),
+                    query,
+                    prefer_directory=None,
+                    max_results=15,
+                    max_scanned=12000,
+                ),
+            )
+
         find_path_patterns = [
             (r'(?:najdi|hledej|find) (?:mi )?(?:soubor|file) (.+)$', False),
             (r'(?:najdi|hledej|find) (?:mi )?(?:slozku|slo\?ku|folder|adresar) (.+)$', True),
             (r'(?:najdi|hledej|find) (?:mi )?(?:v pc|na pc|v pocitaci|on pc) (.+)$', None),
+            (r'(?:najdi|hledej|find) (?:mi )?(?:v pocitaci|na pocitaci|in computer) (.+)$', None),
+            (r'(?:kde je|where is) (.+)$', None),
         ]
         for pattern, prefer_directory in find_path_patterns:
             match = re.search(pattern, normalized, flags=re.IGNORECASE)
             if not match:
                 continue
-            query = match.group(1).strip()
+            query = self._clean_search_query(match.group(1))
             if not query:
                 return "Luna: Chybi nazev, ktery mam hledat."
             return self._guarded_action(
@@ -2059,7 +2541,7 @@ class LunaEngine:
             return self._guarded_action("app_launch", f"open url {raw_url}", lambda: self.desktop_actions.open_url(raw_url, prefer_chrome=prefer_chrome))
 
         browser_match = re.fullmatch(
-            r'(?:otevri|otev\?i|open|spust|spus\?|zapni|launch|start) (?:mi )?(?:google chrome|chrome|prohlizec|browser)',
+            r'(?:otevri|otev\?i|open|spust|spus\?|zapni|launch|start) (?:mi )?(?:google chrome|chrome|chrom|prohlizec|browser)',
             normalized,
             flags=re.IGNORECASE,
         )
@@ -2103,16 +2585,32 @@ class LunaEngine:
                 )
 
         search_match = re.search(
-            r'(?:vyhledej|hledej|najdi na webu|najdi na google|search|google)(?: (?:v|ve|na) (?:chrome|google|webu|internetu))? (.+)$',
+            r'(?:hledej na webu|hledej na google|najdi na webu|najdi na google|najdi online|vyhledej|hledej|search|google)(?: (?:v|ve|na) (?:chrome|google|webu|internetu))? (.+)$',
             normalized,
             flags=re.IGNORECASE,
         )
         if search_match:
-            query = search_match.group(1).strip()
+            query = self._clean_search_query(search_match.group(1))
             if not query:
                 return "Luna: Chybi hledany dotaz."
             prefer_chrome = any(token in lowered for token in ["chrome", "google chrome"])
             return self._guarded_action("app_launch", f"search web for {query}", lambda: self.desktop_actions.search_web(query, prefer_chrome=prefer_chrome))
+
+        run_command_match = re.fullmatch(
+            r'(?:(?:spust|spustit|spus\?|run) (?:mi )?(?:prikaz|p\?ikaz|command) )?'
+            r'((?:npm start|npm install(?: [@a-zA-Z0-9._/\-]+){0,6}|npm i(?: [@a-zA-Z0-9._/\-]+){0,6}|npm run (?:dev|start|build|test)|python (?:main\.py|src[\\/ ]main\.py|app\.py)|python -m pytest|pytest|dir|echo .+))',
+            normalized,
+            flags=re.IGNORECASE,
+        )
+        if run_command_match:
+            command_text = run_command_match.group(1).strip().replace("src main.py", "src/main.py")
+            workspace = self._default_action_root()
+            command_category = "dependency_install" if command_text.lower().startswith(("npm install", "npm i")) else "project_run"
+            return self._guarded_action(
+                command_category,
+                f"run command {command_text}",
+                lambda: self.desktop_actions.run_safe_command(command_text, workspace),
+            )
 
         shortcut_match = re.fullmatch(
             r'(?:stiskni|zmackni|press) (?:klavesu |klavesovou zkratku |zkratku |key |shortcut )?([a-z0-9+\-\s]+)',
@@ -3084,7 +3582,7 @@ class LunaEngine:
         }
         return all(status_by_title.get(title, "pending") == "completed" for title in dependencies)
 
-    def _task_priority_score(self, task: dict[str, str]) -> tuple[int, int, int, str]:
+    def _task_priority_score(self, task: Mapping[str, object]) -> tuple[int, int, int, str]:
         status = str(task.get("status", "pending")).strip().lower()
         has_hint = bool(str(task.get("action_hint", "")).strip())
         risk = str(task.get("risk", "")).strip().lower()
@@ -3133,6 +3631,115 @@ class LunaEngine:
             return {"ok": False, "message": "No next agent task is available for this project."}
         return self.run_agent_task_action(project_id, next_task)  # type: ignore
 
+    def _agent_loop_task_title(self, task: Mapping[str, object] | None) -> str:
+        if not task:
+            return "Task"
+        return repair_text(str(task.get("title", "Task"))).strip() or "Task"
+
+    def _append_agent_loop_step(
+        self,
+        loop: AgentLoopResult,
+        task: Mapping[str, object] | None,
+        result: dict[str, object],
+        *,
+        repair: bool = False,
+    ) -> None:
+        title = self._agent_loop_task_title(task)
+        status = str(result.get("status", "completed" if result.get("ok") else "failed")).strip() or "completed"
+        message = repair_text(str(result.get("message", "")).strip())
+        detail = repair_text(str(result.get("detail", "")).strip())
+        loop.add_step(
+            AgentLoopStep(
+                index=len(loop.steps) + 1,
+                title=title,
+                status=status,
+                ok=bool(result.get("ok", False)),
+                message=message or detail or title,
+                detail=detail,
+                repair=repair,
+            )
+        )
+        self._trace_agent(
+            phase="agent_loop_repair" if repair else "agent_loop_step",
+            status=status,
+            detail=detail or message,
+            metadata={"task": title, "ok": bool(result.get("ok", False)), "repair": repair},
+        )
+
+    def _agent_loop_should_pause_after_success(self, task: Mapping[str, object], result: dict[str, object]) -> bool:
+        status = str(result.get("status", "")).strip().lower()
+        action_hint = str(task.get("action_hint", "")).strip().lower()
+        action_key = str(result.get("action_key", "")).strip().lower()
+        if status == "in_progress":
+            return True
+        if action_hint == "open_workspace_in_tool":
+            return True
+        return action_key in {"run_command", "run_static_web_server", "open_workspace_in_tool"} and status == "in_progress"
+
+    def _repair_agent_loop_failure(
+        self,
+        project_id: str,
+        task: Mapping[str, object],
+        result: dict[str, object],
+    ) -> dict[str, object]:
+        project = self.projects.get_project(project_id)
+        title = self._agent_loop_task_title(task)
+        if project is None:
+            return {"ok": False, "status": "failed", "message": "Project could not be found for repair."}
+
+        action_hint = str(task.get("action_hint", "")).strip().lower()
+        failure_text = ascii_fold_text(
+            " ".join(
+                [
+                    title,
+                    action_hint,
+                    str(result.get("message", "")),
+                    str(result.get("detail", "")),
+                ]
+            )
+        ).lower()
+        workspace = self.desktop_actions.ensure_project_workspace(project.name)
+
+        try:
+            if "vscode" in failure_text or "vs code" in failure_text or "app path" in failure_text or "cesta" in failure_text:
+                repair = self.desktop_actions.describe_app_path("vscode", self.user_settings.data)
+                if repair.get("ok"):
+                    self.projects.add_memory_entry(project_id, "Agent repair: verified VS Code path before retry.")
+                return self._coerce_action_result(repair, category="file_read", title=f"repair: {title}")
+
+            if "workspace" in failure_text or "scaffold" in failure_text or "slozk" in failure_text:
+                message = self.desktop_actions.create_project_scaffold(project.name, project.brief)
+                self.projects.add_memory_entry(project_id, f"Agent repair: refreshed workspace scaffold for {project.name}.")
+                return self._coerce_action_result(message, category="file_change", title=f"repair: {title}")
+
+            if (
+                "entrypoint" in failure_text
+                or "package.json" in failure_text
+                or "spousteci prikaz" in failure_text
+                or "run" in failure_text
+            ):
+                message = self.desktop_actions.create_project_scripts(workspace)
+                self.projects.add_memory_entry(project_id, "Agent repair: generated run scripts for the workspace.")
+                return self._coerce_action_result(message, category="file_change", title=f"repair: {title}")
+
+            observation = self.desktop_observer.observe(include_screenshot=False)
+            summary = self.desktop_observer.summarize(observation)
+            self._remember_observation(observation, source="agent loop repair")
+            self.projects.add_memory_entry(project_id, f"Agent repair observation: {summary}")
+            return {
+                "ok": True,
+                "status": "completed",
+                "message": "Agent checked the desktop state before retry.",
+                "detail": summary,
+                "category": "observe",
+                "action_key": "agent_loop_repair_observe",
+                "workspace": str(workspace),
+            }
+        except OSError as error:
+            detail = f"Repair failed: {error}"
+            self.projects.add_memory_entry(project_id, f"Agent repair failed: {title} -> {detail}")
+            return {"ok": False, "status": "failed", "message": detail, "detail": detail}
+
     def run_next_agent_chain(self, project_id: str, max_steps: int = 3) -> dict[str, object]:
         self._reload_runtime_preferences()
         max_steps = self._agent_chain_budget(max_steps)
@@ -3159,62 +3766,106 @@ class LunaEngine:
                 intelligence_level=intelligence_level,
             )
 
-        results: list[str] = []
-        executed = 0
+        loop = AgentLoopResult()
+        self.agent_run_state.start(
+            user_input=f"agent loop for {project.name}",
+            input_source="agent",
+            owner="Luna+Xeno",
+            scope="project_agent_loop",
+            risk="medium",
+            vision_active=bool(self.live_screen_summary or (self.last_desktop_observation or {}).get("vision_summary")),
+            xeno_active=bool(agent_model_support),
+            status="running",
+            note="Autonomous project agent loop started.",
+        )
+        self._trace_agent(
+            phase="agent_loop_start",
+            status="running",
+            detail=f"Project: {project.name}; max steps: {max_steps}",
+            metadata={"project_id": project_id, "max_steps": max_steps},
+        )
         last_project = project
+        unresolved_failure = False
 
-        for _ in range(max_steps):
+        for step_number in range(max_steps):
             next_task = self.get_next_agent_task(project_id)
             if next_task is None:
+                loop.finish(ok=not unresolved_failure, status="completed", stopped_reason="No more ready tasks.")
                 break
+
+            self.agent_run_state.update(
+                action_title=self._agent_loop_task_title(next_task),
+                tool_name=str(next_task.get("tool", "")),
+                status="running",
+                note=f"Loop step {step_number + 1}: {self._agent_loop_task_title(next_task)}",
+            )
             result = self.run_agent_task_action(project_id, next_task)  # type: ignore
+            self._append_agent_loop_step(loop, next_task, result)
             if not result.get("ok"):
-                if results:
-                    updated = self.projects.get_project(project_id)
-                    message = "Chain stopped after partial progress. " + " ".join(results) + " " + str(result.get("message", ""))
-                    if agent_model_support:
-                        message += "\n\nAgent model guidance:\n" + agent_model_support
-                    return {
-                        "ok": True,
-                        "message": message.strip(),
-                        "project": self._serialize_project(updated),
-                    }
-                message = str(result.get("message", "")).strip()
-                if agent_model_support:
-                    message = (message + "\n\nAgent model guidance:\n" + agent_model_support).strip()
-                return {
-                    "ok": False,
-                    "message": message,
-                    "project": self._serialize_project(self.projects.get_project(project_id)),
-                }
+                repair = self._repair_agent_loop_failure(project_id, next_task, result)
+                self._append_agent_loop_step(loop, next_task, repair, repair=True)
+                if repair.get("ok"):
+                    retry = self.run_agent_task_action(project_id, next_task)  # type: ignore
+                    self._append_agent_loop_step(loop, next_task, retry)
+                    if not retry.get("ok"):
+                        unresolved_failure = True
+                        loop.finish(ok=False, status="failed", stopped_reason="Retry failed after repair.")
+                        break
+                    result = retry
+                else:
+                    unresolved_failure = True
+                    loop.finish(ok=False, status="failed", stopped_reason="Repair failed.")
+                    break
 
-            executed += 1
-            message = str(result.get("message", "")).strip()
-            if message:
-                results.append(message)
             last_project = self.projects.get_project(project_id) or last_project
-            if str(next_task.get("status", "")).strip().lower() == "in_progress":
+            if self._agent_loop_should_pause_after_success(next_task, result):  # type: ignore
+                loop.finish(ok=True, status="in_progress", stopped_reason="Started a long-running or user-visible step.")
                 break
-            if str(next_task.get("action_hint", "")).strip().lower() == "open_workspace_in_tool":
-                break
-            if "opened" in message.lower() or "workspace" in message.lower():
-                break
+        else:
+            loop.finish(
+                ok=not unresolved_failure and loop.executed > 0,
+                status="completed" if not unresolved_failure else "failed",
+                stopped_reason="Step budget reached.",
+            )
 
-        if executed == 0:
-            return {"ok": False, "message": "No next agent chain could be executed."}
+        if not loop.stopped_reason:
+            if loop.executed == 0 and loop.repaired == 0:
+                loop.finish(ok=False, status="failed", stopped_reason="No next agent task could be executed.")
+            else:
+                loop.finish(
+                    ok=not unresolved_failure,
+                    status="completed" if not unresolved_failure else "failed",
+                    stopped_reason="Loop finished.",
+                )
 
         updated = self.projects.get_project(project_id) or last_project
-        summary = f"Agent chain executed {executed} step{'s' if executed != 1 else ''}."
-        detail = " ".join(results)
-        final_message = f"{summary} {detail}".strip()
-        self.projects.add_memory_entry(project_id, summary)
+        final_message = loop.summary()
+        self.projects.add_memory_entry(project_id, f"Agent loop: {final_message[:500]}")
         if agent_model_support:
             self.projects.add_memory_entry(project_id, f"Agent model guidance: {agent_model_support[:220]}")
             final_message += "\n\nAgent model guidance:\n" + agent_model_support
+        self.agent_run_state.update(
+            status=loop.status,
+            final_message=final_message,
+            note=f"Agent loop stopped: {loop.stopped_reason}",
+        )
+        self._trace_agent(
+            phase="agent_loop_stop",
+            status=loop.status,
+            detail=loop.stopped_reason,
+            metadata={"executed": loop.executed, "repaired": loop.repaired, "failed": loop.failed},
+        )
         return {
-            "ok": True,
+            "ok": loop.ok,
             "message": final_message,
             "project": self._serialize_project(updated),
+            "loop": {
+                "status": loop.status,
+                "executed": loop.executed,
+                "repaired": loop.repaired,
+                "failed": loop.failed,
+                "stopped_reason": loop.stopped_reason,
+            },
         }
 
     def run_agent_task_action(self, project_id: str, task_payload: dict[str, object] | str) -> dict[str, object]:

@@ -306,6 +306,83 @@ function ShareAutomationPanel({ shareAutomation, onCloseShareDebugPanel }) {
   );
 }
 
+function AgentCoreBar({ thinkingState }) {
+  const lunaActive = Boolean(thinkingState?.lunaActive);
+  const xenoActive = Boolean(thinkingState?.xenoActive);
+  const bothActive = lunaActive && xenoActive;
+
+  return (
+    <div className={`agent-core-bar ${bothActive ? 'is-dual-active' : ''}`} aria-label="LunaAI and XenoAI status">
+      <div className={`agent-core-node is-luna ${lunaActive ? 'is-active' : ''}`}>
+        <span>Visible interface</span>
+        <strong>LunaAI</strong>
+      </div>
+      <div className="agent-core-link is-left" aria-hidden="true">
+        <span />
+      </div>
+      <div className="agent-core-orb">
+        <Orb3D />
+      </div>
+      <div className="agent-core-link is-right" aria-hidden="true">
+        <span />
+      </div>
+      <div className={`agent-core-node is-xeno ${xenoActive ? 'is-active' : ''}`}>
+        <span>Reasoning layer</span>
+        <strong>XenoAI</strong>
+      </div>
+    </div>
+  );
+}
+
+function isActionLogMessage(message) {
+  if (message?.role !== 'assistant') return false;
+  const content = repairDisplayedText(message?.content || '').toLowerCase();
+  return (
+    content.includes('**akce:**')
+    || content.includes('*vysledek:*')
+    || content.includes('akce:')
+    || content.includes('výsledek:')
+    || content.includes('vysledek:')
+    || content.includes('spouštím ')
+    || content.includes('spoustim ')
+    || content.includes('opened ')
+    || content.includes('otevřela jsem ')
+    || content.includes('otevrela jsem ')
+  );
+}
+
+function compactActionMessages(messages) {
+  const compacted = [];
+  let index = 0;
+
+  while (index < messages.length) {
+    const message = messages[index];
+    if (!isActionLogMessage(message)) {
+      compacted.push(message);
+      index += 1;
+      continue;
+    }
+
+    const group = [message];
+    index += 1;
+    while (index < messages.length && isActionLogMessage(messages[index])) {
+      group.push(messages[index]);
+      index += 1;
+    }
+
+    const latest = group[group.length - 1];
+    compacted.push({
+      ...latest,
+      id: `${latest.id || 'action'}-compact-${group.length}`,
+      author: 'Agent',
+      isActionLog: true,
+      actionCount: group.length,
+    });
+  }
+
+  return compacted;
+}
+
 export default function ChatArea({
   messages,
   chatId = '',
@@ -319,7 +396,8 @@ export default function ChatArea({
   onStopScreenShare = null,
   onCloseShareDebugPanel = null,
 }) {
-  const hasMessages = messages.length > 0;
+  const displayMessages = compactActionMessages(messages);
+  const hasMessages = displayMessages.length > 0;
   const messagesPanelRef = useRef(null);
   const messagesEndRef = useRef(null);
 
@@ -346,6 +424,7 @@ export default function ChatArea({
   if (!hasMessages && !revealingMessage?.content) {
     return (
       <section className="chat-workspace chat-workspace-empty">
+        <AgentCoreBar thinkingState={thinkingState} />
         <div className="empty-chat-stage">
           <div className="empty-chat-core">
             <Orb3D />
@@ -362,12 +441,16 @@ export default function ChatArea({
 
   return (
     <section className="chat-workspace is-live">
+      <AgentCoreBar thinkingState={thinkingState} />
       <div className="messages-panel" ref={messagesPanelRef}>
         <ThinkingPanel thinkingState={thinkingState} />
-        {messages.map((message) => (
+        {displayMessages.map((message) => (
           <article key={message.id} className={`message-row ${message.role === 'user' ? 'is-user' : 'is-assistant'}`}>
-            <div className={`message-bubble ${message.role === 'user' ? 'is-user' : 'is-assistant'} ${message.author === 'Xeno' ? 'is-xeno' : ''}`}>
-              <span className={`message-author ${message.author === 'Xeno' ? 'is-xeno' : ''}`}>{message.author}</span>
+            <div className={`message-bubble ${message.role === 'user' ? 'is-user' : 'is-assistant'} ${message.author === 'Xeno' ? 'is-xeno' : ''} ${message.isActionLog ? 'is-action-log' : ''}`}>
+              <span className={`message-author ${message.author === 'Xeno' ? 'is-xeno' : ''} ${message.isActionLog ? 'is-action-log' : ''}`}>
+                {message.author}
+                {message.isActionLog && message.actionCount > 1 ? <em>{message.actionCount} actions</em> : null}
+              </span>
               <MessageContent content={message.content} />
             </div>
           </article>

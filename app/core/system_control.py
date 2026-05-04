@@ -48,8 +48,8 @@ class SystemControlLayer:
     }
 
     def normalize_profile(self, profile_key: str) -> str:
-        key = (profile_key or "assist").strip().lower()
-        return key if key in self.PROFILES else "assist"
+        key = (profile_key or "operator").strip().lower()
+        return key if key in self.PROFILES else "operator"
 
     def apply_profile(self, workspace: UserWorkspaceSettings, profile_key: str) -> UserWorkspaceSettings:
         profile = self.PROFILES[self.normalize_profile(profile_key)]

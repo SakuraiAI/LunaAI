@@ -16,11 +16,14 @@ const SAFE_INTERNAL_ACTIONS = {
   ]),
 };
 
-const CONFIRM_SYSTEM_ACTIONS = new Set([
+const SAFE_SYSTEM_ACTIONS = new Set([
   'open_app',
   'open_url',
   'open_path',
   'focus_window',
+]);
+
+const CONFIRM_SYSTEM_ACTIONS = new Set([
   'type_text',
   'mouse_click',
   'keyboard_input',
@@ -72,6 +75,18 @@ export function evaluateActionPolicy(action) {
         requiresConfirmation: false,
       },
       layer: 'electron',
+    };
+  }
+
+  if (SAFE_SYSTEM_ACTIONS.has(normalized.type)) {
+    return {
+      decision: 'safe',
+      reason: 'Safe reversible system action.',
+      action: {
+        ...normalized,
+        requiresConfirmation: false,
+      },
+      layer: 'system',
     };
   }
 

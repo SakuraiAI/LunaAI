@@ -7,6 +7,7 @@ import { getSharedBackendSettingsPath, readBackendUserSettings } from './backend
 
 const applicationCatalog = [
   { id: 'app-vscode', key: 'vscode', name: 'VS Code', detail: 'Connected workspace editor', pathField: 'vscode_path' },
+  { id: 'app-chrome', key: 'chrome', name: 'Google Chrome', detail: 'Web browser and URL automation layer', pathField: 'chrome_path' },
   { id: 'app-blender', key: 'blender', name: 'Blender', detail: '3D and asset creation layer', pathField: 'blender_path' },
   { id: 'app-unreal', key: 'unreal', name: 'Unreal Engine', detail: 'Real-time scene and game environment', pathField: 'unreal_engine_path' },
   { id: 'app-unity', key: 'unity', name: 'Unity', detail: 'Game editor and runtime workspace', pathField: 'unity_path' },
@@ -83,4 +84,3 @@ export function launchApplication(appKey) {
     return { ok: false, message: `${appState.title} failed to launch. ${error}` };
   }
 }
-

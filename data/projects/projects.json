@@ -72,8 +72,8 @@
         }
       ],
       "memory_entries": [
-        "Luna direction: Chrome je otevřený a načtená stránka je YouTube. 🌐 Pokud potřebuješ něco dalšího, dej vědět.",
-        "Chat focus: jdi na chrome a bez na youtube",
+        "Luna direction: {\n\"action\": \"open_app\",\n\"app\": \"chrome\",\n\"target\": null\n}",
+        "Chat focus: spust chrom",
         "Desktop observe: Desktop app -> working in a desktop application | LunaAI | visual context captured",
         "Desktop observe: Desktop app -> working in a desktop application | LunaAI",
         "Desktop observe: VS Code -> editing source code or configuration files | ● engine.py - LunaAI - Visual Studio Code | visual context captured",

@@ -22,14 +22,16 @@ LM_STUDIO_MODEL = get_env_str("LM_STUDIO_MODEL", "google/gemma-3-4b")
 LM_STUDIO_API_TOKEN = get_env_str("LM_STUDIO_API_TOKEN", "")
 LM_STUDIO_TIMEOUT_SECONDS = get_env_int("LM_STUDIO_TIMEOUT_SECONDS", 180)
 
+NVIDIA_API_KEY = get_env_str("NVIDIA_API_KEY", "")
+
 LUNA_NVIDIA_BASE_URL = get_env_str("LUNA_NVIDIA_BASE_URL", "https://integrate.api.nvidia.com/v1")
 LUNA_NVIDIA_MODEL = get_env_str("LUNA_NVIDIA_MODEL", "openai/gpt-oss-120b")
-LUNA_NVIDIA_API_TOKEN = get_env_str("LUNA_NVIDIA_API_TOKEN", "")
+LUNA_NVIDIA_API_TOKEN = get_env_str("LUNA_NVIDIA_API_TOKEN", NVIDIA_API_KEY)
 LUNA_NVIDIA_TIMEOUT_SECONDS = get_env_int("LUNA_NVIDIA_TIMEOUT_SECONDS", 180)
 
 NVIDIA_BASE_URL = get_env_str("NVIDIA_BASE_URL", "https://integrate.api.nvidia.com/v1")
-NVIDIA_MODEL = get_env_str("NVIDIA_MODEL", "nvidia/nemotron-3-super-120b-a12b")
-NVIDIA_API_TOKEN = get_env_str("NVIDIA_API_TOKEN", "")
+NVIDIA_MODEL = get_env_str("NVIDIA_MODEL", "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning")
+NVIDIA_API_TOKEN = get_env_str("NVIDIA_API_TOKEN", NVIDIA_API_KEY)
 NVIDIA_TIMEOUT_SECONDS = get_env_int("NVIDIA_TIMEOUT_SECONDS", 180)
 NVIDIA_REASONING_BUDGET = get_env_int("NVIDIA_REASONING_BUDGET", 16384)
 NVIDIA_ENABLE_THINKING = get_env_bool("NVIDIA_ENABLE_THINKING", True)
@@ -147,6 +149,7 @@ __all__ = [
     "LUNA_NVIDIA_MODEL",
     "LUNA_NVIDIA_API_TOKEN",
     "LUNA_NVIDIA_TIMEOUT_SECONDS",
+    "NVIDIA_API_KEY",
     "NVIDIA_BASE_URL",
     "NVIDIA_MODEL",
     "NVIDIA_API_TOKEN",

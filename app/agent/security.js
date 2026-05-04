@@ -2,10 +2,12 @@ import path from 'node:path';
 
 export const ALLOWED_ACTIONS = new Set([
   'open_app',
+  'open_url',
   'run_command',
   'read_file',
   'write_file',
   'list_files',
+  'find_app_path',
   'get_system_info',
 ]);
 
@@ -98,9 +100,25 @@ export function validateAgentCommand(command, workspaceRoot) {
     return { ok: true };
   }
 
+  if (action === 'open_url') {
+    const target = sanitizeText(command?.target || command?.url || '');
+    if (!/^(https?:\/\/|localhost:\d+|www\.|[a-z0-9.-]+\.[a-z]{2,})/i.test(target)) {
+      return { ok: false, error: 'URL target is missing or invalid.' };
+    }
+    return { ok: true };
+  }
+
+  if (action === 'find_app_path') {
+    const target = sanitizeText(command?.target || '').toLowerCase();
+    if (!target) {
+      return { ok: false, error: 'Missing app name.' };
+    }
+    return { ok: true };
+  }
+
   if (action === 'run_command') {
     const { executable, args, cwd } = sanitizeCommandPayload(command);
-    const allowedExecutables = new Set(['npm', 'node', 'python', 'py', 'git']);
+    const allowedExecutables = new Set(['npm', 'node', 'python', 'py', 'pytest', 'dir', 'echo']);
     if (!executable) {
       return { ok: false, error: 'Missing command executable.' };
     }
@@ -110,6 +128,21 @@ export function validateAgentCommand(command, workspaceRoot) {
     const joined = [executable, ...args].join(' ');
     if (isDangerousCommand(joined)) {
       return { ok: false, error: 'The requested command is blocked by security policy.' };
+    }
+    if (/^npm$/i.test(executable)) {
+      const npmStart = args.length === 1 && args[0] === 'start';
+      const npmRun = args.length === 2 && args[0] === 'run' && ['dev', 'start', 'build', 'test'].includes(args[1]);
+      const npmInstall = args.length >= 1 && ['install', 'i', 'add'].includes(args[0]) && args.slice(1).every((item) => /^[@a-z0-9._/-]+$/i.test(item));
+      if (!npmStart && !npmRun && !npmInstall) {
+        return { ok: false, error: 'Only npm start, npm run dev/start/build/test, and confirmed npm install commands are allowed.' };
+      }
+    }
+    if (/^(python|py)$/i.test(executable)) {
+      const joinedArgs = args.join(' ').replace(/\\/g, '/').toLowerCase();
+      const allowedPython = ['main.py', 'src/main.py', 'app.py', '-m pytest'];
+      if (!allowedPython.includes(joinedArgs)) {
+        return { ok: false, error: 'Only python main.py, python src/main.py, python app.py, and python -m pytest are allowed.' };
+      }
     }
     if (cwd && !isPathInsideWorkspace(cwd, workspaceRoot)) {
       return { ok: false, error: 'Command working directory must stay inside the workspace.' };
@@ -143,12 +176,15 @@ export function requiresConfirmation(command, workspaceRoot) {
 
   if (action === 'write_file') {
     const targetPath = sanitizeText(command?.target || command?.path || '');
-    return !isPathInsideWorkspace(targetPath, workspaceRoot);
+    const inside = isPathInsideWorkspace(targetPath, workspaceRoot);
+    return !inside || command?.overwrite === true;
   }
 
   if (action === 'run_command') {
-    const { executable } = sanitizeCommandPayload(command);
-    return /^(npm|git|python|py|node)$/i.test(executable);
+    const { executable, args } = sanitizeCommandPayload(command);
+    const joined = [executable, ...args].join(' ').toLowerCase();
+    if (/^npm (install|i|add)(?:\s|$)/i.test(joined)) return true;
+    return !['npm start', 'python main.py', 'python src/main.py', 'dir'].includes(joined) && !joined.startsWith('echo ');
   }
 
   return false;

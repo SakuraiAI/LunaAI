@@ -3,7 +3,10 @@ from __future__ import annotations
 import os
 import ctypes
 import json
+import platform
 import re
+import shlex
+import shutil
 import subprocess
 import sys
 import time
@@ -36,6 +39,7 @@ class DesktopActionTool:
         "fl_studio": "fl_studio_path",
         "photoshop": "photoshop_path",
         "vscode": "vscode_path",
+        "chrome": "chrome_path",
         "davinci": "davinci_resolve_path",
         "unity": "unity_path",
         "premiere": "premiere_pro_path",
@@ -50,6 +54,7 @@ class DesktopActionTool:
         "fl_studio": "FL Studio",
         "photoshop": "Photoshop",
         "vscode": "VS Code",
+        "chrome": "Google Chrome",
         "davinci": "DaVinci Resolve",
         "unity": "Unity",
         "premiere": "Premiere Pro",
@@ -932,16 +937,37 @@ Open `index.html` in a browser to preview it.
         return "\n".join(lines)
 
     def _chrome_candidates(self) -> list[Path]:
+        candidates: list[Path] = []
+
+        settings_file = Path("data/settings/user_settings.json")
+        try:
+            settings_payload = json.loads(settings_file.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            settings_payload = {}
+        if isinstance(settings_payload, dict):
+            configured = str(settings_payload.get("chrome_path", "") or "").strip()
+            if configured:
+                candidates.append(Path(configured).expanduser())
+
+        apps_config = self._load_apps_config()
+        configured = str(apps_config.get("chrome", "") or "").strip()
+        if configured:
+            candidates.append(Path(configured).expanduser())
+
         roots = [
             os.environ.get("LOCALAPPDATA", ""),
             os.environ.get("PROGRAMFILES", ""),
             os.environ.get("PROGRAMFILES(X86)", ""),
+            "C:/Program Files",
+            "C:/Program Files (x86)",
         ]
-        candidates: list[Path] = []
         for root in roots:
             if not root:
                 continue
             candidates.append(Path(root) / "Google" / "Chrome" / "Application" / "chrome.exe")
+        found_on_path = shutil.which("chrome") or shutil.which("chrome.exe")
+        if found_on_path:
+            candidates.append(Path(found_on_path))
         return candidates
 
     def _find_chrome_path(self) -> Path | None:
@@ -949,6 +975,27 @@ Open `index.html` in a browser to preview it.
             if candidate.exists():
                 return candidate
         return None
+
+    def _is_process_running(self, process_names: set[str]) -> bool:
+        if os.name != "nt":
+            return False
+        expected = {name.strip().lower() for name in process_names if name.strip()}
+        if not expected:
+            return False
+        for process_name in expected:
+            try:
+                completed = subprocess.run(
+                    ["tasklist.exe", "/FI", f"IMAGENAME eq {process_name}"],
+                    capture_output=True,
+                    text=True,
+                    timeout=3,
+                    check=False,
+                )
+            except (OSError, subprocess.TimeoutExpired):
+                continue
+            if completed.returncode == 0 and process_name in completed.stdout.lower():
+                return True
+        return False
 
     def _normalize_url(self, value: str) -> str:
         url = str(value or "").strip()
@@ -1035,13 +1082,28 @@ Open `index.html` in a browser to preview it.
         if chrome_path is not None:
             subprocess.Popen([str(chrome_path), normalized_url])
             focused = self._focus_window_by_process_names({"chrome.exe"}, timeout_seconds=3.0)
+            running = self._is_process_running({"chrome.exe"})
+            expected_app = "browser"
         else:
             os.startfile(normalized_url)
             focused = self._focus_window_by_process_names(
                 {"chrome.exe", "msedge.exe", "firefox.exe", "opera.exe", "brave.exe"},
                 timeout_seconds=3.0,
             )
-        focus_detail = "Browser window focused." if focused else "Browser launch requested, but foreground focus was not confirmed."
+            running = self._is_process_running({"chrome.exe", "msedge.exe", "firefox.exe", "opera.exe", "brave.exe"})
+            expected_app = "browser"
+
+        if not focused and not running:
+            return self._result(
+                ok=False,
+                status="failed",
+                message=f"Požádala jsem o otevření {normalized_url}, ale nepotvrdila jsem běžící okno prohlížeče.",
+                detail=f"URL launch requested: {normalized_url}. No browser process/window was confirmed.",
+                category="app_launch",
+                action_key="open_url",
+            )
+
+        focus_detail = "Browser window focused." if focused else "Browser process is running, but foreground focus was not confirmed."
         result = self._result(
             ok=True,
             status="completed",
@@ -1052,7 +1114,9 @@ Open `index.html` in a browser to preview it.
         )
         result["target_url"] = normalized_url
         result["target_domain"] = expected_domain
-        result["expected_app_key"] = "browser"
+        result["expected_app_key"] = expected_app
+        result["focus_confirmed"] = focused
+        result["process_confirmed"] = running
         result["message"] = (
             f"Otevřela jsem {normalized_url}."
             if focused
@@ -1081,7 +1145,12 @@ Open `index.html` in a browser to preview it.
     def open_browser(self, *, prefer_chrome: bool = True) -> dict[str, str | bool]:
         result = self.open_url("https://www.google.com", prefer_chrome=prefer_chrome)
         result["action_key"] = "open_browser"
-        result["message"] = "Otevřela jsem Google Chrome."
+        if bool(result.get("ok")):
+            result["message"] = (
+                "Otevřela jsem Google Chrome."
+                if bool(result.get("focus_confirmed"))
+                else "Google Chrome běží, ale nepodařilo se mi potvrdit, že je okno nahoře."
+            )
         result["target_domain"] = ""
         return result
 
@@ -1346,21 +1415,107 @@ Open `index.html` in a browser to preview it.
             return ""
         return str(getattr(workspace_settings, field_name, "") or "").strip()
 
+    def _load_apps_config(self) -> dict[str, str]:
+        config_file = Path("config/apps.json")
+        try:
+            payload = json.loads(config_file.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return {}
+        if not isinstance(payload, dict):
+            return {}
+        return {str(key).strip().lower(): str(value).strip() for key, value in payload.items() if str(key).strip()}
+
+    def _app_command_candidates(self, app_key: str) -> list[str]:
+        aliases = {
+            "vscode": ["code", "code.cmd"],
+            "chrome": ["chrome", "chrome.exe"],
+            "blender": ["blender", "blender.exe"],
+            "unreal": ["UnrealEditor", "UnrealEditor.exe", "UE4Editor", "UE4Editor.exe"],
+            "unity": ["Unity", "Unity.exe"],
+            "discord": ["Discord", "Discord.exe"],
+            "explorer": ["explorer", "explorer.exe"],
+            "figma": ["Figma", "Figma.exe"],
+        }
+        return aliases.get(app_key, [app_key, f"{app_key}.exe"])
+
+    def find_app_path(self, app_key: str, workspace_settings: UserWorkspaceSettings | None = None) -> str:
+        key = str(app_key or "").strip().lower()
+        if not key:
+            return ""
+
+        if workspace_settings is not None:
+            configured = self._app_path_for(key, workspace_settings)
+            if configured:
+                configured_path = Path(configured).expanduser()
+                if configured_path.exists() or shutil.which(configured):
+                    return configured
+
+        apps_config = self._load_apps_config()
+        configured = apps_config.get(key, "")
+        if configured:
+            configured_path = Path(configured).expanduser()
+            if configured_path.exists() or shutil.which(configured):
+                return configured
+
+        for command_name in self._app_command_candidates(key):
+            found = shutil.which(command_name)
+            if found:
+                return found
+
+        if os.name == "nt":
+            for command_name in self._app_command_candidates(key):
+                try:
+                    completed = subprocess.run(
+                        ["where.exe", command_name],
+                        capture_output=True,
+                        text=True,
+                        timeout=3,
+                        check=False,
+                    )
+                except (OSError, subprocess.TimeoutExpired):
+                    continue
+                if completed.returncode == 0:
+                    first = completed.stdout.splitlines()[0].strip() if completed.stdout.splitlines() else ""
+                    if first:
+                        return first
+        return ""
+
+    def describe_app_path(self, app_key: str, workspace_settings: UserWorkspaceSettings) -> dict[str, str | bool]:
+        found = self.find_app_path(app_key, workspace_settings)
+        app_name = self.APP_DISPLAY_NAMES.get(app_key, app_key)
+        if not found:
+            return self._result(
+                ok=False,
+                status="failed",
+                message=f"Nenasla jsem cestu pro {app_name}.",
+                detail="Checked user settings, config/apps.json, PATH, and Windows where.exe.",
+                category="file_read",
+                action_key="find_app_path",
+            )
+        return self._result(
+            ok=True,
+            status="completed",
+            message=f"Cesta pro {app_name}: {found}",
+            detail=f"Resolved app path: {found}",
+            category="file_read",
+            action_key="find_app_path",
+        )
+
     def launch_connected_app(
         self,
         app_key: str,
         workspace_settings: UserWorkspaceSettings,
         project_name: str = "",
     ) -> dict[str, str | bool]:
-        app_path = self._app_path_for(app_key, workspace_settings)
+        app_path = self.find_app_path(app_key, workspace_settings)
         app_name = self.APP_DISPLAY_NAMES.get(app_key, app_key)
         action_key = f"launch_{app_key}"
         if not app_path:
             return self._result(
                 ok=False,
                 status="failed",
-                message=f"{app_name} nema nastavenou cestu.",
-                detail="No app path is configured yet.",
+                message=f"{app_name} nema nastavenou cestu a nepodarilo se ji najit automaticky.",
+                detail="No app path was found in settings, config/apps.json, PATH, or Windows where.exe.",
                 category="app_launch",
                 action_key=action_key,
             )
@@ -1444,6 +1599,158 @@ Open `index.html` in a browser to preview it.
             detail=f"{app_name} launched.",
             category="app_launch",
             action_key=action_key,
+        )
+
+    def _is_inside_workspace_root(self, path: Path) -> bool:
+        resolved = Path(path).expanduser().resolve()
+        allowed_roots = [Path.cwd().resolve(), self.workspace_root.expanduser().resolve()]
+        for root in allowed_roots:
+            if resolved == root or root in resolved.parents:
+                return True
+        return False
+
+    def _safe_command_parts(self, command_text: str) -> tuple[list[str], str, bool]:
+        cleaned = str(command_text or "").strip()
+        if not cleaned:
+            raise OSError("Missing command.")
+        if re.search(r"[|&;><`]", cleaned):
+            raise OSError("Shell chaining, redirection, and pipes are blocked.")
+        if re.search(
+            r"\b(del|erase|rm|rmdir|rd|format|shutdown|restart-computer|stop-computer|regedit|reg|diskpart|bcdedit|takeown|icacls|taskkill|system32|runas|sudo)\b",
+            cleaned,
+            flags=re.IGNORECASE,
+        ):
+            raise OSError("This command is blocked by safety policy.")
+
+        lowered = cleaned.lower()
+        if lowered == "dir":
+            return [], "dir", False
+        if lowered.startswith("echo "):
+            return [], cleaned, False
+
+        try:
+            parts = shlex.split(cleaned, posix=False)
+        except ValueError as error:
+            raise OSError(f"Could not parse command safely: {error}") from error
+        if not parts:
+            raise OSError("Missing command.")
+
+        executable = parts[0].lower()
+        if executable in {"npm", "npm.cmd"}:
+            if len(parts) == 2 and parts[1].lower() == "start":
+                return self._npm_run_command("start"), "npm start", True
+            if len(parts) >= 2 and parts[1].lower() in {"install", "i", "add"}:
+                if len(parts) > 8:
+                    raise OSError("Too many packages requested in one install command.")
+                if any(not re.fullmatch(r"[@a-zA-Z0-9._/\-]+", part) for part in parts[2:]):
+                    raise OSError("Package name contains unsupported characters.")
+                if os.name == "nt":
+                    return ["cmd", "/c", *parts], " ".join(parts), True
+                return parts, " ".join(parts), True
+            if len(parts) == 3 and parts[1].lower() == "run" and parts[2].lower() in {"dev", "start", "build", "test"}:
+                return self._npm_run_command(parts[2].lower()), f"npm run {parts[2].lower()}", parts[2].lower() in {"dev", "start"}
+            raise OSError("Only npm start and npm run dev/start/build/test are allowed.")
+
+        if executable in {"python", "python.exe", "py", "py.exe"}:
+            if len(parts) == 2 and parts[1].replace("\\", "/").lower() in {"main.py", "src/main.py", "app.py"}:
+                return [sys.executable, parts[1]], f"python {parts[1]}", False
+            if len(parts) == 3 and parts[1] == "-m" and parts[2].lower() in {"pytest"}:
+                return [sys.executable, "-m", parts[2]], f"python -m {parts[2]}", False
+            raise OSError("Only python main.py, python src/main.py, python app.py, and python -m pytest are allowed.")
+
+        if executable == "pytest":
+            return ["pytest"], "pytest", False
+
+        raise OSError(f"Command '{parts[0]}' is not in the safe allowlist.")
+
+    def run_safe_command(self, command_text: str, workspace: Path | None = None, timeout_seconds: int = 25) -> dict[str, str | bool]:
+        target_workspace = Path(workspace or Path.cwd()).expanduser().resolve()
+        if not target_workspace.exists() or not target_workspace.is_dir():
+            raise OSError(f"Working directory does not exist: {target_workspace}")
+        if not self._is_inside_workspace_root(target_workspace):
+            raise OSError("Command working directory must stay inside the LunaAI workspace.")
+
+        command, label, long_running = self._safe_command_parts(command_text)
+        lowered = str(command_text or "").strip().lower()
+        if lowered == "dir":
+            return self._result(
+                ok=True,
+                status="completed",
+                message=self.list_folder(target_workspace),
+                detail=f"Listed {target_workspace}",
+                category="project_run",
+                action_key="run_command",
+                workspace=str(target_workspace),
+            )
+        if lowered.startswith("echo "):
+            message = str(command_text).strip()[5:].strip()
+            return self._result(
+                ok=True,
+                status="completed",
+                message=message,
+                detail=f"Echo command returned: {message}",
+                category="project_run",
+                action_key="run_command",
+                workspace=str(target_workspace),
+            )
+
+        creation_flags = getattr(subprocess, "CREATE_NEW_CONSOLE", 0) if os.name == "nt" else 0
+        if long_running:
+            if creation_flags:
+                subprocess.Popen(command, cwd=str(target_workspace), creationflags=creation_flags)
+            else:
+                subprocess.Popen(command, cwd=str(target_workspace))
+            return self._result(
+                ok=True,
+                status="in_progress",
+                message=f"Spoustim `{label}` v {target_workspace}.",
+                detail=f"Started long-running command: {' '.join(command)}",
+                category="project_run",
+                action_key="run_command",
+                workspace=str(target_workspace),
+            )
+
+        completed = subprocess.run(
+            command,
+            cwd=str(target_workspace),
+            capture_output=True,
+            text=True,
+            timeout=max(3, timeout_seconds),
+            check=False,
+        )
+        stdout = (completed.stdout or "").strip()
+        stderr = (completed.stderr or "").strip()
+        output = stdout or stderr or f"Exit code {completed.returncode}"
+        if len(output) > 4000:
+            output = output[:4000].rstrip() + "\n... output zkracen."
+        return self._result(
+            ok=completed.returncode == 0,
+            status="completed" if completed.returncode == 0 else "failed",
+            message=f"`{label}` dokonceno." if completed.returncode == 0 else f"`{label}` skoncilo chybou.",
+            detail=output,
+            category="project_run",
+            action_key="run_command",
+            workspace=str(target_workspace),
+        )
+
+    def get_system_info(self) -> dict[str, str | bool]:
+        detail = "\n".join(
+            [
+                f"OS: {platform.system()} {platform.release()}",
+                f"Version: {platform.version()}",
+                f"Machine: {platform.machine()}",
+                f"Python: {platform.python_version()}",
+                f"User: {os.environ.get('USERNAME') or os.environ.get('USER') or 'unknown'}",
+                f"Workspace: {Path.cwd()}",
+            ]
+        )
+        return self._result(
+            ok=True,
+            status="completed",
+            message="System info retrieved.",
+            detail=detail,
+            category="file_read",
+            action_key="get_system_info",
         )
 
     def run_task_action(

@@ -9,7 +9,8 @@ class UserWorkspaceSettings:
     blender_path: str = ""
     fl_studio_path: str = ""
     photoshop_path: str = ""
-    vscode_path: str = ""
+    vscode_path: str = ""
+    chrome_path: str = ""
     davinci_resolve_path: str = ""
     unity_path: str = ""
     premiere_pro_path: str = ""
@@ -21,9 +22,9 @@ class UserWorkspaceSettings:
     google_email: str = ""
     profile_display_name: str = ""
     profile_image_path: str = ""
-    system_control_profile: str = "assist"
+    system_control_profile: str = "operator"
     intelligence_level: str = "4"
-    agent_execution_mode: str = "ask"
+    agent_execution_mode: str = "auto"
     allow_app_launch: bool = True
     allow_path_open: bool = True
     allow_file_changes: bool = True

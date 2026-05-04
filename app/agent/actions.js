@@ -1,7 +1,7 @@
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 
 import { sanitizeCommandPayload, sanitizeText } from './security.js';
 
@@ -16,11 +16,54 @@ function buildResult(success, action, target, message, error = null, extra = {})
   };
 }
 
+function normalizeUrl(value) {
+  const raw = sanitizeText(value);
+  if (!raw) return '';
+  if (/^localhost:/i.test(raw)) return `http://${raw}`;
+  if (/^www\./i.test(raw)) return `https://${raw}`;
+  if (!/^https?:\/\//i.test(raw)) return `https://${raw}`;
+  return raw;
+}
+
+function appCommandCandidates(target) {
+  const candidates = {
+    vscode: ['code.cmd', 'code.exe', 'code'],
+    chrome: ['chrome.exe', 'chrome'],
+    blender: ['blender.exe', 'blender'],
+    unreal: ['UnrealEditor.exe', 'UnrealEditor', 'UE4Editor.exe', 'UE4Editor'],
+    discord: ['Discord.exe', 'Discord'],
+    explorer: ['explorer.exe', 'explorer'],
+  };
+  return candidates[target] || [target, `${target}.exe`];
+}
+
+function findExecutableOnPath(target) {
+  const lookupCommand = process.platform === 'win32' ? 'where' : 'which';
+  for (const candidate of appCommandCandidates(target)) {
+    const result = spawnSync(lookupCommand, [candidate], {
+      encoding: 'utf8',
+      windowsHide: true,
+      shell: false,
+    });
+    if (result.status === 0) {
+      const first = String(result.stdout || '').split(/\r?\n/).find(Boolean);
+      if (first) return first.trim();
+    }
+  }
+  return '';
+}
+
+function resolveAppPath(target, context) {
+  const configured = sanitizeText(context.appPaths[target]);
+  if (configured) return configured;
+  return findExecutableOnPath(target);
+}
+
 async function openApp(command, context) {
   const target = sanitizeText(command?.target || '').toLowerCase();
-  const appPath = context.appPaths[target];
+  const appPath = resolveAppPath(target, context);
   if (!appPath) {
-    return buildResult(false, 'open_app', target, `App '${target}' is not configured.`, 'APP_NOT_CONFIGURED');
+    return buildResult(false, 'open_app', target, `App '${target}' is not configured and was not found on PATH.`, 'APP_NOT_FOUND');
   }
 
   try {
@@ -38,10 +81,71 @@ async function openApp(command, context) {
   }
 }
 
+async function openUrl(command, context) {
+  const url = normalizeUrl(command?.target || command?.url || '');
+  if (!url) {
+    return buildResult(false, 'open_url', '', 'URL is missing.', 'MISSING_URL');
+  }
+
+  const chromePath = resolveAppPath('chrome', context);
+  const executable = chromePath || (process.platform === 'win32' ? 'cmd' : 'xdg-open');
+  const args = chromePath ? [url] : process.platform === 'win32' ? ['/c', 'start', '', url] : [url];
+  try {
+    const child = spawn(executable, args, {
+      cwd: context.workspaceRoot,
+      detached: true,
+      stdio: 'ignore',
+      windowsHide: true,
+      shell: false,
+    });
+    child.unref();
+    return buildResult(true, 'open_url', url, `URL opened: ${url}`, null, { pid: child.pid ?? null });
+  } catch (error) {
+    return buildResult(false, 'open_url', url, 'Failed to open URL', String(error));
+  }
+}
+
+async function findAppPathAction(command, context) {
+  const target = sanitizeText(command?.target || '').toLowerCase();
+  const appPath = resolveAppPath(target, context);
+  if (!appPath) {
+    return buildResult(false, 'find_app_path', target, `App '${target}' was not found.`, 'APP_NOT_FOUND');
+  }
+  return buildResult(true, 'find_app_path', target, `Resolved ${target}: ${appPath}`, null, { appPath });
+}
+
 async function runCommand(command, context) {
   const { executable, args, cwd } = sanitizeCommandPayload(command);
   const target = executable;
   const workingDirectory = cwd || context.workspaceRoot;
+  const joined = [executable, ...args].join(' ').toLowerCase();
+
+  if (executable === 'dir') {
+    return await listFilesAction({ action: 'list_files', target: workingDirectory }, context);
+  }
+  if (executable === 'echo') {
+    return buildResult(true, 'run_command', 'echo', args.join(' '), null, { stdout: args.join(' ') });
+  }
+  if (joined === 'npm start' || joined === 'npm run dev' || joined === 'npm run start') {
+    try {
+      const child = spawn(executable, args, {
+        cwd: workingDirectory,
+        detached: true,
+        stdio: 'ignore',
+        windowsHide: false,
+        shell: false,
+        env: {
+          ...process.env,
+          PYTHONUTF8: '1',
+          PYTHONIOENCODING: 'utf-8',
+        },
+      });
+      child.unref();
+      return buildResult(true, 'run_command', target, `Started ${joined}`, null, { pid: child.pid ?? null, inProgress: true });
+    } catch (error) {
+      return buildResult(false, 'run_command', target, 'Command failed to start', String(error));
+    }
+  }
 
   return await new Promise((resolve) => {
     const child = spawn(executable, args, {
@@ -145,10 +249,12 @@ async function getSystemInfoAction() {
 export function createAgentActions() {
   return {
     open_app: openApp,
+    open_url: openUrl,
     run_command: runCommand,
     read_file: readFileAction,
     write_file: writeFileAction,
     list_files: listFilesAction,
+    find_app_path: findAppPathAction,
     get_system_info: getSystemInfoAction,
   };
 }

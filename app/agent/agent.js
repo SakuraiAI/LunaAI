@@ -50,7 +50,7 @@ export class LocalPcActionAgent {
       return await this.#logAndReturn(buildResult(false, command.action, command.target, validation.error, validation.error));
     }
 
-    if (requiresConfirmation(command, this.workspaceRoot)) {
+    if (requiresConfirmation(command, this.workspaceRoot) || await this.#requiresDynamicConfirmation(command)) {
       const confirmationId = this.#buildConfirmationId(command);
       this.pendingConfirmations.set(confirmationId, command);
       return await this.#logAndReturn(buildResult(
@@ -137,6 +137,25 @@ export class LocalPcActionAgent {
       return { ok: false, error: 'Target path is outside the workspace and is blocked.' };
     }
     return { ok: true };
+  }
+
+  async #requiresDynamicConfirmation(command) {
+    if (command.confirmation_granted) {
+      return false;
+    }
+    if (command.action !== 'write_file') {
+      return false;
+    }
+    const targetPath = path.resolve(command.target);
+    if (!isPathInsideWorkspace(targetPath, this.workspaceRoot)) {
+      return true;
+    }
+    try {
+      const stat = await fs.stat(targetPath);
+      return stat.isFile();
+    } catch {
+      return false;
+    }
   }
 
   async #loadAppsConfig() {

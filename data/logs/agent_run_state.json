@@ -1,20 +1,21 @@
 {
-  "run_id": "c41637fa0c69",
-  "created_at": "2026-04-30T22:48:56",
-  "updated_at": "2026-04-30T22:48:58",
-  "user_input": "jdi na chrome a bez na youtube",
+  "run_id": "58e762df31a1",
+  "created_at": "2026-05-02T16:31:13",
+  "updated_at": "2026-05-04T21:08:21",
+  "user_input": "spust chrom",
   "input_source": "chat",
-  "owner": "Luna",
-  "scope": "conversation",
-  "risk": "none",
+  "owner": "Xeno",
+  "scope": "local_action",
+  "risk": "low",
   "status": "completed",
   "vision_active": false,
-  "xeno_active": false,
-  "action_title": "",
-  "tool_name": "",
+  "xeno_active": true,
+  "action_title": "model open url https://www.youtube.com",
+  "tool_name": "open_app",
   "requires_confirmation": false,
-  "final_message": "Chrome je otevřený a načtená stránka je YouTube. 🌐 Pokud potřebuješ něco dalšího, dej vědět.",
+  "final_message": "Overeni: plocha vypada stabilne; aktivni je Desktop app (working in a desktop application). Vision: Vision analysis was requested but failed: NVIDIA vision model is not reachable. Details: <urlopen error [WinError 10013] Došlo k pokusu o přístup k soketu způsobem zakázaným jeho přístupovými oprávněními>",
   "notes": [
-    "Normal chat route."
+    "Normal chat route.",
+    "Otevření aplikace, URL nebo webového hledání je lokální akce. Spustím ji jen podle nastaveného režimu potvrzení. Tool contract: open_app, risk=medium, confirmation=yes."
   ]
 }
