@@ -1188,11 +1188,21 @@ class LunaEngine:
         status = str(result.get("status", "completed")).strip().lower()
         message = repair_text(str(result.get("message", "")).strip())
         detail = repair_text(str(result.get("detail", "")).strip())
+
+        def clean_visible_text(value: str) -> str:
+            cleaned = repair_text(str(value or "")).strip()
+            cleaned = re.sub(r"^(?:Luna|Agent|Xeno)\s*:\s*", "", cleaned, flags=re.IGNORECASE).strip()
+            if self._extract_model_json_object(cleaned) is not None:
+                return "Interni akcni plan jsem zachytila a predala executor vrstve."
+            return cleaned
+
+        message = clean_visible_text(message)
+        detail = clean_visible_text(detail)
         if pending:
             xeno_note = repair_text(str(result.get("xeno_note", "")).strip())
             if xeno_note:
-                return f"Luna: Xeno zkontroloval plán: {xeno_note} Akce je připravená. Stačí dát Accept, nebo ji zrušit přes Cancel. 🙂"
-            return "Luna: Akce je připravená. Stačí dát Accept, nebo ji zrušit přes Cancel. 🙂"
+                return f"Luna: Xeno zkontroloval plan: {xeno_note} Akce je pripravena. Staci dat Accept, nebo ji zrusit pres Cancel."
+            return "Luna: Akce je pripravena. Staci dat Accept, nebo ji zrusit pres Cancel."
         if status == "blocked":
             return f"Luna: Tuhle akci ted nemuzu spustit. {detail or message}".strip()
         if status == "failed":
@@ -2058,6 +2068,113 @@ class LunaEngine:
         cleaned = re.sub(r"\s+(?:prosim|please)$", "", cleaned, flags=re.IGNORECASE).strip(" .,:;!?")
         return cleaned
 
+    def _should_skip_reopening_active_app(self, user_input: str, app_key: str) -> bool:
+        normalized_input = ascii_fold_text(repair_text(str(user_input or ""))).lower().strip()
+        if not normalized_input or not app_key:
+            return False
+
+        open_markers = (
+            "otevri",
+            "otevrit",
+            "open",
+            "spust",
+            "spustit",
+            "zapni",
+            "launch",
+            "start",
+        )
+        if any(marker in normalized_input for marker in open_markers):
+            return False
+
+        creative_markers = (
+            "udelej",
+            "vytvor",
+            "create",
+            "make",
+            "build",
+            "model",
+            "objekt",
+            "mesh",
+            "scenu",
+            "scene",
+            "asset",
+        )
+        if not any(marker in normalized_input for marker in creative_markers):
+            return False
+
+        observation = self.last_desktop_observation or {}
+        observed_app_key = ascii_fold_text(str(observation.get("app_key", "") or "")).lower().strip()
+        return observed_app_key == app_key
+
+    def _is_blender_context_active(self) -> bool:
+        observation = self.last_desktop_observation or {}
+        observed_app_key = ascii_fold_text(str(observation.get("app_key", "") or "")).lower().strip()
+        title = ascii_fold_text(str(observation.get("active_window_title", "") or "")).lower().strip()
+        activity = ascii_fold_text(str(observation.get("inferred_activity", "") or "")).lower().strip()
+        context = " ".join([title, activity, self._project_context()]).lower()
+        return observed_app_key == "blender" or "blender" in context or ".blend" in context
+
+    def _looks_like_blender_scene_request(self, user_input: str) -> bool:
+        normalized = ascii_fold_text(repair_text(str(user_input or ""))).lower().strip()
+        if not normalized:
+            return False
+
+        creation_markers = (
+            "vytvor",
+            "vytvo",
+            "vytvoril",
+            "vytvorila",
+            "udelej",
+            "udělej",
+            "udelal",
+            "udělal",
+            "udelas",
+            "uděláš",
+            "udelat",
+            "udělat",
+            "pridej",
+            "přidej",
+            "dej tam",
+            "postav",
+            "make",
+            "create",
+            "add",
+            "build",
+        )
+        blender_markers = (
+            "blender",
+            "3d",
+            "model",
+            "scena",
+            "scene",
+            "asset",
+            "mesh",
+            "objekt",
+        )
+        object_markers = (
+            "auto",
+            "car",
+            "vehicle",
+            "vozidlo",
+            "mercedes",
+            "benz",
+            "amg",
+            "c63",
+            "raket",
+            "rocket",
+            "planet",
+            "planeta",
+            "mistnost",
+            "místnost",
+            "room",
+            "studio",
+        )
+        if any(marker in normalized for marker in creation_markers) and any(marker in normalized for marker in blender_markers):
+            return True
+        if self._is_blender_context_active() and any(marker in normalized for marker in creation_markers) and any(marker in normalized for marker in object_markers):
+            return True
+        return False
+
     def _extract_model_json_object(self, text: str) -> dict[str, object] | None:
         cleaned = repair_text(str(text or "")).strip()
         if not cleaned:
@@ -2113,7 +2230,10 @@ class LunaEngine:
                     "Never claim that anything was executed. "
                     "If the user asks for multiple browser steps like 'open chrome and put youtube', choose open_url with prefer_chrome=true. "
                     "If the request is destructive, unsafe, vague, or needs unsupported automation, return tool='none'. "
-                    "Allowed tools: open_url, open_app, search_web, find_app_path, find_path, read_file, list_folder, run_command, get_system_info, none. "
+                    "Allowed tools: open_url, open_app, create_blender_scene, search_web, find_app_path, find_path, read_file, list_folder, run_command, get_system_info, none. "
+                    "If the user asks to make a Blender model, Blender scene, or 3D asset, choose create_blender_scene with args.prompt. "
+                    "If Blender is the active context and the user asks to add or make an object, choose create_blender_scene. "
+                    "Do not choose search_web for Blender object creation unless the user explicitly asks to search the web or download an asset. "
                     "Use this JSON shape exactly: "
                     "{\"tool\":\"open_url\",\"args\":{\"url\":\"https://www.youtube.com\",\"prefer_chrome\":true},\"category\":\"app_launch\",\"requiresConfirmation\":false,\"reason\":\"short\"}."
                 ),
@@ -2157,6 +2277,7 @@ class LunaEngine:
         allowed_tools = {
             "open_url",
             "open_app",
+            "create_blender_scene",
             "search_web",
             "find_app_path",
             "find_path",
@@ -2179,7 +2300,7 @@ class LunaEngine:
 
     def _execute_model_agent_action(self, user_input: str, plan: dict[str, object]) -> str | None:
         tool = ascii_fold_text(str(plan.get("tool", ""))).lower().strip()
-        raw_args = plan.get("args", {})
+        raw_args = plan.get("args", plan.get("parameters", {}))
         args: dict[str, object] = {str(key): value for key, value in raw_args.items()} if isinstance(raw_args, dict) else {}
         normalized_input = ascii_fold_text(str(user_input or "")).lower()
 
@@ -2199,6 +2320,16 @@ class LunaEngine:
             query = self._clean_search_query(str(args.get("query") or args.get("target") or ""))
             if not query:
                 return None
+            if self._looks_like_blender_scene_request(user_input) or (
+                self._is_blender_context_active()
+                and any(token in ascii_fold_text(query).lower() for token in ["3d", "model", "mercedes", "amg", "c63", "car", "auto"])
+            ):
+                workspace = self._default_action_root()
+                return self._guarded_action(
+                    "file_change",
+                    "model add object to Blender scene",
+                    lambda: self.desktop_actions.create_blender_scene(workspace, user_input, self.user_settings.data),
+                )
             prefer_chrome = bool(args.get("prefer_chrome")) or "chrome" in normalized_input or "chrom" in normalized_input
             return self._guarded_action(
                 "app_launch",
@@ -2209,6 +2340,14 @@ class LunaEngine:
         if tool == "open_app":
             app_key = self._known_app_key(str(args.get("app") or args.get("target") or user_input))
             if not app_key:
+                return None
+            if self._should_skip_reopening_active_app(user_input, app_key):
+                self._trace_agent(
+                    phase="agent_model_execute",
+                    status="skipped",
+                    detail=f"Skipped reopening already active app: {app_key}",
+                    metadata={"tool": tool, "app_key": app_key},
+                )
                 return None
             if app_key == "chrome":
                 return self._guarded_action(
@@ -2228,6 +2367,17 @@ class LunaEngine:
                 raise OSError(message or "Aplikaci se nepodarilo otevrit.")
 
             return self._guarded_action("app_launch", f"model open {app_key}", launch_app)
+
+        if tool == "create_blender_scene":
+            prompt = repair_text(str(args.get("prompt") or args.get("description") or args.get("target") or user_input)).strip()
+            if not prompt:
+                return None
+            workspace = self._default_action_root()
+            return self._guarded_action(
+                "file_change",
+                "model create Blender scene",
+                lambda: self.desktop_actions.create_blender_scene(workspace, prompt, self.user_settings.data),
+            )
 
         if tool == "find_app_path":
             app_key = self._known_app_key(str(args.get("app") or args.get("target") or user_input))
@@ -2306,6 +2456,27 @@ class LunaEngine:
             )
             return None
 
+    def _try_structured_action_response(self, user_input: str, response: str) -> str | None:
+        plan = self._extract_model_json_object(response)
+        if plan is None:
+            return None
+        action_name = str(plan.get("tool", "") or plan.get("action", "")).strip()
+        if not action_name:
+            return None
+        plan["tool"] = action_name
+        if "args" not in plan and "parameters" in plan:
+            plan["args"] = plan.get("parameters", {})
+        try:
+            return self._execute_model_agent_action(user_input, plan)
+        except OSError as error:
+            self._trace_agent(
+                phase="agent_structured_response",
+                status="failed",
+                detail=str(error),
+                metadata={"tool": action_name},
+            )
+            return None
+
     def _chain_action_category(self, parts: list[str]) -> str:
         lowered = " ".join(parts).lower()
         if any(token in lowered for token in ["vytvor", "udelej", "create", "make", "prepis", "rewrite", "overwrite", "append", "pridej do"]):
@@ -2341,9 +2512,13 @@ class LunaEngine:
         return cleaned
 
     def _try_local_action(self, user_input: str) -> str | None:
-        model_action_result = self._try_model_agent_action(user_input)
-        if model_action_result is not None:
-            return model_action_result
+        if self._looks_like_blender_scene_request(user_input):
+            workspace = self._default_action_root()
+            return self._guarded_action(
+                "file_change",
+                "create or update Blender scene",
+                lambda: self.desktop_actions.create_blender_scene(workspace, user_input, self.user_settings.data),
+            )
 
         local_path_result = self._try_local_path_action(user_input)
         if local_path_result is not None:
@@ -2366,6 +2541,10 @@ class LunaEngine:
                 return ". ".join(messages) + "."
 
             return self._guarded_action(category, f"chain action: {title}", run_chain)
+
+        model_action_result = self._try_model_agent_action(user_input)
+        if model_action_result is not None:
+            return model_action_result
 
         return self._try_local_app_action(user_input)
 
@@ -2742,6 +2921,23 @@ class LunaEngine:
                 return message
 
             return self._guarded_action("file_change", "create python calculator", create_calculator)
+
+        blender_scene_requested = self._looks_like_blender_scene_request(user_input) or (
+            "blender" in lowered
+            and any(token in lowered for token in ["vytvor", "udelej", "create", "make", "postav", "build", "model", "scenu", "scene", "3d"])
+        ) or bool(
+            re.search(
+                r'(?:vytvor|udelej|create|make|postav|build) (?:mi )?(?:3d )?(?:model|scenu|scene|asset)(?: .*)?$',
+                normalized,
+                flags=re.IGNORECASE,
+            )
+        )
+        if blender_scene_requested:
+            def create_blender_scene() -> dict[str, object]:
+                workspace = self._default_action_root()
+                return self.desktop_actions.create_blender_scene(workspace, user_input, self.user_settings.data)  # type: ignore[return-value]
+
+            return self._guarded_action("file_change", "create Blender scene", create_blender_scene)
 
         project_blueprints = [
             (r'(?:vytvor|vytvo\?|udelej|ud\?lej|create|make) python projekt (.+?)(?: a otevri ve vscode| and open in vscode)?$', "python"),
@@ -3339,7 +3535,7 @@ class LunaEngine:
             self.memory_coordinator.save_exchange(cleaned_input, observation_result)
             return observation_result
 
-        if initial_route.should_attempt_local_action:
+        if initial_route.should_attempt_local_action or self._looks_like_blender_scene_request(cleaned_input):
             original_override = self._action_mode_override
             if initial_route.force_auto_execution and original_override is None:
                 self._action_mode_override = "auto"
@@ -3451,6 +3647,12 @@ class LunaEngine:
             response = self._generate_xeno_response(messages)
         else:
             response = self._generate_primary_response(messages)
+        structured_action_result = self._try_structured_action_response(cleaned_input, str(response or ""))
+        if structured_action_result is not None:
+            self.memory_coordinator.remember_user_input(cleaned_input, "action")
+            self.memory_coordinator.save_exchange(cleaned_input, structured_action_result)
+            self._remember_project_chat_focus(cleaned_input, structured_action_result)
+            return structured_action_result
         if not str(response).strip():
             response = "Luna: Tentokrat z modelu nic rozumneho neprislo. Zkus to prosim jeste jednou 🙂"
         debug_footer = self._build_model_debug_footer(xeno_consulted=xeno_consulted)

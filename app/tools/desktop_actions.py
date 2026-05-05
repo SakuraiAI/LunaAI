@@ -1516,6 +1516,288 @@ Open `index.html` in a browser to preview it.
             action_key="find_app_path",
         )
 
+    def _blender_scene_script(self, prompt: str, output_file: Path) -> str:
+        prompt_json = json.dumps(str(prompt or "simple LunaAI scene"), ensure_ascii=False)
+        output_json = json.dumps(str(output_file), ensure_ascii=False)
+        return f'''import math
+import os
+import bpy
+
+PROMPT = {prompt_json}
+OUTPUT_FILE = {output_json}
+
+
+def clear_scene():
+    bpy.ops.object.select_all(action="SELECT")
+    bpy.ops.object.delete()
+
+
+def make_material(name, color):
+    material = bpy.data.materials.new(name)
+    material.use_nodes = True
+    material.node_tree.nodes["Principled BSDF"].inputs["Base Color"].default_value = color
+    material.node_tree.nodes["Principled BSDF"].inputs["Roughness"].default_value = 0.42
+    material.node_tree.nodes["Principled BSDF"].inputs["Metallic"].default_value = color[3] * 0.35
+    return material
+
+
+def assign_material(obj, material):
+    obj.data.materials.append(material)
+    return obj
+
+
+def add_cube(name, location, scale, material):
+    bpy.ops.mesh.primitive_cube_add(size=1, location=location)
+    obj = bpy.context.object
+    obj.name = name
+    obj.scale = scale
+    assign_material(obj, material)
+    return obj
+
+
+def add_cylinder(name, location, radius, depth, material, vertices=48):
+    bpy.ops.mesh.primitive_cylinder_add(vertices=vertices, radius=radius, depth=depth, location=location)
+    obj = bpy.context.object
+    obj.name = name
+    assign_material(obj, material)
+    return obj
+
+
+def add_cone(name, location, radius1, radius2, depth, material, vertices=48):
+    bpy.ops.mesh.primitive_cone_add(vertices=vertices, radius1=radius1, radius2=radius2, depth=depth, location=location)
+    obj = bpy.context.object
+    obj.name = name
+    assign_material(obj, material)
+    return obj
+
+
+def add_sphere(name, location, radius, material):
+    bpy.ops.mesh.primitive_uv_sphere_add(segments=48, ring_count=24, radius=radius, location=location)
+    obj = bpy.context.object
+    obj.name = name
+    assign_material(obj, material)
+    return obj
+
+
+def create_rocket(materials):
+    body = add_cylinder("Rocket body", (0, 0, 1.8), 0.55, 3.6, materials["silver"])
+    body.rotation_euler[0] = 0
+    nose = add_cone("Rocket nose", (0, 0, 3.85), 0.58, 0.02, 1.1, materials["white"])
+    flame = add_cone("Engine flame", (0, 0, -0.45), 0.55, 0.08, 1.1, materials["orange"])
+    flame.rotation_euler[0] = math.pi
+    for index, angle in enumerate((0, 2.094, 4.188)):
+        fin = add_cube(f"Stabilizer fin {{index + 1}}", (math.cos(angle) * 0.58, math.sin(angle) * 0.58, 0.25), (0.08, 0.38, 0.55), materials["blue"])
+        fin.rotation_euler[2] = angle
+    return body
+
+
+def create_car(materials, offset=(0, 0, 0), name_prefix=""):
+    ox, oy, oz = offset
+    add_cube(f"{{name_prefix}}AMG C63 body", (ox, oy, oz + 0.45), (2.25, 0.88, 0.24), materials["dark"])
+    add_cube(f"{{name_prefix}}AMG C63 hood", (ox + 0.72, oy, oz + 0.62), (0.78, 0.82, 0.12), materials["silver"])
+    add_cube(f"{{name_prefix}}AMG C63 cabin", (ox - 0.18, oy, oz + 0.92), (0.8, 0.66, 0.36), materials["white"])
+    add_cube(f"{{name_prefix}}AMG C63 rear", (ox - 0.95, oy, oz + 0.62), (0.52, 0.84, 0.16), materials["blue"])
+    add_cube(f"{{name_prefix}}front splitter", (ox + 1.2, oy, oz + 0.28), (0.16, 0.9, 0.05), materials["silver"])
+    for x in (-1.15, 1.15):
+        for y in (-0.62, 0.62):
+            wheel = add_cylinder(f"{{name_prefix}}Wheel", (ox + x, oy + y, oz + 0.2), 0.22, 0.18, materials["dark"], vertices=32)
+            wheel.rotation_euler[1] = math.pi / 2
+    add_cube(f"{{name_prefix}}AMG badge", (ox + 1.24, oy - 0.01, oz + 0.58), (0.03, 0.24, 0.08), materials["orange"])
+
+
+def create_planet(materials):
+    add_sphere("Planet", (0, 0, 1.3), 1.2, materials["blue"])
+    ring = add_cylinder("Planet ring", (0, 0, 1.3), 1.85, 0.04, materials["silver"], vertices=96)
+    ring.scale.z = 0.05
+    ring.rotation_euler[0] = math.radians(82)
+
+
+def create_room(materials):
+    add_cube("Floor", (0, 0, -0.05), (3.4, 3.4, 0.08), materials["dark"])
+    add_cube("Back wall", (0, 1.72, 1.4), (3.4, 0.08, 1.5), materials["white"])
+    add_cube("Desk", (0, 0.45, 0.45), (1.7, 0.55, 0.12), materials["blue"])
+    add_cube("Monitor", (0, 0.72, 1.05), (0.8, 0.05, 0.45), materials["dark"])
+
+
+def create_abstract(materials):
+    add_sphere("Luna core", (0, 0, 1.25), 0.75, materials["silver"])
+    for index in range(8):
+        angle = index * math.tau / 8
+        pillar = add_cube(f"Orbit shard {{index + 1}}", (math.cos(angle) * 1.45, math.sin(angle) * 1.45, 1.1), (0.08, 0.28, 0.65), materials["blue"])
+        pillar.rotation_euler[2] = angle
+
+
+def add_label(text, materials):
+    bpy.ops.object.text_add(location=(-1.9, -1.75, 0.1), rotation=(math.radians(75), 0, 0))
+    label = bpy.context.object
+    label.name = "Scene label"
+    label.data.body = text[:72]
+    label.data.align_x = "LEFT"
+    label.data.size = 0.16
+    label.data.extrude = 0.01
+    assign_material(label, materials["white"])
+
+
+def setup_camera_and_light():
+    bpy.ops.object.light_add(type="AREA", location=(0, -3.2, 5.0))
+    light = bpy.context.object
+    light.name = "Softbox"
+    light.data.energy = 650
+    light.data.size = 4
+    bpy.ops.object.camera_add(location=(3.3, -5.2, 3.1), rotation=(math.radians(60), 0, math.radians(34)))
+    bpy.context.scene.camera = bpy.context.object
+
+
+def main():
+    lower_prompt = PROMPT.lower()
+    add_to_existing = os.path.exists(OUTPUT_FILE) and any(word in lower_prompt for word in (
+        "add", "přidej", "pridej", "dej tam", "vedle", "next to", "k tomu", "do toho", "tam"
+    ))
+    if add_to_existing:
+        bpy.ops.wm.open_mainfile(filepath=OUTPUT_FILE)
+    else:
+        clear_scene()
+    materials = {{
+        "silver": make_material("lunar silver", (0.72, 0.74, 0.78, 1)),
+        "white": make_material("soft white", (0.92, 0.92, 0.88, 1)),
+        "blue": make_material("xeno blue", (0.08, 0.22, 0.42, 1)),
+        "orange": make_material("warm engine glow", (1.0, 0.32, 0.04, 1)),
+        "dark": make_material("matte black", (0.02, 0.02, 0.025, 1)),
+    }}
+    if any(word in lower_prompt for word in ("rocket", "raket", "ship", "spaceship")):
+        create_rocket(materials)
+    elif any(word in lower_prompt for word in ("car", "auto", "vehicle", "mercedes", "benz", "amg", "c63")):
+        create_car(materials, offset=(2.6, -0.15, 0) if add_to_existing else (0, 0, 0), name_prefix="Added " if add_to_existing else "")
+    elif any(word in lower_prompt for word in ("planet", "planeta", "moon", "mesic")):
+        create_planet(materials)
+    elif any(word in lower_prompt for word in ("room", "mistnost", "workspace", "studio")):
+        create_room(materials)
+    else:
+        create_abstract(materials)
+    add_label(("Added: " if add_to_existing else "") + PROMPT, materials)
+    if not add_to_existing:
+        setup_camera_and_light()
+    bpy.ops.wm.save_as_mainfile(filepath=OUTPUT_FILE)
+
+
+main()
+'''
+
+    def create_blender_scene(
+        self,
+        workspace: Path,
+        prompt: str,
+        workspace_settings: UserWorkspaceSettings,
+    ) -> dict[str, str | bool]:
+        target_workspace = Path(workspace).expanduser().resolve()
+        if not self._is_inside_workspace_root(target_workspace):
+            raise OSError("Blender output must stay inside the LunaAI workspace.")
+
+        scene_folder = target_workspace / "blender"
+        scene_folder.mkdir(parents=True, exist_ok=True)
+        output_file = scene_folder / "luna_scene.blend"
+        script_file = scene_folder / "create_scene.py"
+        readme_file = scene_folder / "README.md"
+        script_file.write_text(self._blender_scene_script(prompt, output_file), encoding="utf-8")
+        readme_file.write_text(
+            "# LunaAI Blender Scene\n\n"
+            f"Prompt: {prompt.strip() or 'simple LunaAI scene'}\n\n"
+            "Run manually with:\n\n"
+            "```powershell\n"
+            "blender --background --python create_scene.py\n"
+            "```\n",
+            encoding="utf-8",
+        )
+
+        blender_path = self.find_app_path("blender", workspace_settings)
+        if not blender_path:
+            return self._result(
+                ok=True,
+                status="needs_setup",
+                message=f"Vytvorila jsem Blender script: {script_file}. Nastav cestu k Blenderu a muzu ho rovnou spustit.",
+                detail="Blender path was not found in settings, config/apps.json, PATH, or where.exe.",
+                category="file_change",
+                action_key="create_blender_scene",
+                workspace=str(scene_folder),
+            )
+
+        completed = subprocess.run(
+            [blender_path, "--background", "--python", str(script_file)],
+            cwd=str(scene_folder),
+            capture_output=True,
+            text=False,
+            timeout=180,
+            check=False,
+        )
+        output = (self._decode_process_output(completed.stdout) + "\n" + self._decode_process_output(completed.stderr)).strip()
+        if len(output) > 4000:
+            output = output[:4000].rstrip() + "\n... output zkracen."
+        if completed.returncode != 0:
+            return self._result(
+                ok=False,
+                status="failed",
+                message="Blender script se nepodarilo spustit.",
+                detail=output or f"Blender returned exit code {completed.returncode}.",
+                category="file_change",
+                action_key="create_blender_scene",
+                workspace=str(scene_folder),
+            )
+
+        opened_in_blender = False
+        focus_confirmed = False
+        if output_file.exists():
+            try:
+                subprocess.Popen([blender_path, str(output_file)])
+                opened_in_blender = True
+                focus_confirmed = self._focus_window_by_process_names({"blender.exe"}, timeout_seconds=3.0)
+            except OSError:
+                opened_in_blender = False
+
+        message = "Blender dobehl, ale .blend soubor jsem nenasla."
+        if output_file.exists():
+            message = f"Blender model je hotovy a otevreny: {output_file}" if opened_in_blender else f"Blender model je hotovy: {output_file}"
+
+        detail_parts = [output or f"Script: {script_file}"]
+        if output_file.exists():
+            detail_parts.append(f"Blend file: {output_file}")
+            detail_parts.append("Opened generated .blend in Blender." if opened_in_blender else "Generated .blend was not opened automatically.")
+            if opened_in_blender and not focus_confirmed:
+                detail_parts.append("Blender was launched, but foreground focus was not confirmed.")
+
+        return self._result(
+            ok=output_file.exists(),
+            status="completed" if output_file.exists() else "failed",
+            message=message,
+            detail="\n".join(detail_parts),
+            category="file_change",
+            action_key="create_blender_scene",
+            workspace=str(scene_folder),
+        )
+
+    def _latest_blender_scene_file(self, workspace: Path | None) -> Path | None:
+        # If the chat route lost the active project context, still prefer the
+        # newest generated .blend instead of opening Blender's empty startup file.
+        root = Path(workspace).expanduser() if workspace is not None else self.workspace_root.expanduser()
+        if not root.exists() or not root.is_dir():
+            return None
+
+        candidates: list[Path] = []
+        preferred_folder = root / "blender"
+        search_roots = [preferred_folder, root] if preferred_folder.exists() else [root]
+        for search_root in search_roots:
+            try:
+                candidates.extend(
+                    path
+                    for path in search_root.rglob("*.blend")
+                    if path.is_file() and path.suffix.lower() == ".blend"
+                )
+            except OSError:
+                continue
+        if not candidates:
+            return None
+        candidates.sort(key=lambda path: path.stat().st_mtime, reverse=True)
+        return candidates[0]
+
     def launch_connected_app(
         self,
         app_key: str,
@@ -1549,6 +1831,27 @@ Open `index.html` in a browser to preview it.
         workspace = self.ensure_project_workspace(project_name) if project_name else None
 
         try:
+            if app_key == "blender":
+                blend_file = self._latest_blender_scene_file(workspace)
+                if blend_file is not None:
+                    if target_path.suffix.lower() in {".exe"}:
+                        subprocess.Popen([str(target_path), str(blend_file)])
+                    else:
+                        os.startfile(str(blend_file))
+                    focused = self._focus_window_by_process_names({"blender.exe"}, timeout_seconds=3.0)
+                    return self._result(
+                        ok=True,
+                        status="completed",
+                        message=f"Opened Blender project: {blend_file}.",
+                        detail=(
+                            f"Blender launched with existing .blend file: {blend_file}. "
+                            + ("Foreground focus confirmed." if focused else "Foreground focus was not confirmed.")
+                        ),
+                        category="app_launch",
+                        action_key=action_key,
+                        workspace=str(workspace or self.workspace_root),
+                    )
+
             if app_key == "vscode":
                 if workspace is not None:
                     subprocess.Popen([*self._vscode_command(str(target_path)), "--reuse-window", str(workspace)])

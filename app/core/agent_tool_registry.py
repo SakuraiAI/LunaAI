@@ -143,6 +143,16 @@ class AgentToolRegistry:
                 aliases=("open app", "otevri", "spust", "launch", "vscode", "blender", "chrome", "unreal"),
             ),
             ToolSpec(
+                name="create_blender_scene",
+                category="file_change",
+                description="Create a Blender Python scene script and run it through Blender when blender.exe is available.",
+                args_schema={"prompt": "string", "workspace": "optional project workspace"},
+                returns="created blender/create_scene.py and optional luna_scene.blend",
+                risk="medium",
+                requires_confirmation=True,
+                aliases=("blender scene", "blender model", "3d model", "vytvor v blenderu", "model v blenderu", "blend"),
+            ),
+            ToolSpec(
                 name="open_url",
                 category="app_launch",
                 description="Open a URL in the browser.",

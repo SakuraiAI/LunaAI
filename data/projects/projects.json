@@ -72,8 +72,8 @@
         }
       ],
       "memory_entries": [
-        "Luna direction: Otevřela jsem https://www.youtube.com. Overeni: zmena na plose byla detekovana; aktivni je Web browser (watching or browsing YouTube). Okno: YouTube - Google Ch...",
-        "Chat focus: spust chrome a dej youtube",
+        "Luna direction: {\n\"action\": \"search_web\",\n\"parameters\": {\n\"query\": \"Mercedes AMG C63 free 3d model blender\",\n\"prefer_chrome\": true\n}",
+        "Chat focus: chci aby si tam udelal vedle toho mercedes benz amg c63",
         "Desktop observe: Desktop app -> working in a desktop application | LunaAI | visual context captured",
         "Desktop observe: Desktop app -> working in a desktop application | LunaAI",
         "Desktop observe: VS Code -> editing source code or configuration files | ● engine.py - LunaAI - Visual Studio Code | visual context captured",
